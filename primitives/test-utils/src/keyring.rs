@@ -22,6 +22,7 @@ use finality_grandpa::voter_set::VoterSet;
 use sp_consensus_grandpa::{AuthorityId, AuthorityList, AuthorityWeight};
 use sp_runtime::RuntimeDebug;
 use sp_std::prelude::*;
+use bp_aleph_header_chain::AuthorityId as AlephAuthorityId;
 
 /// Set of test accounts with friendly names.
 pub const ALICE: Account = Account(0);
@@ -68,6 +69,12 @@ impl Account {
 }
 
 impl From<Account> for AuthorityId {
+	fn from(p: Account) -> Self {
+		sp_application_crypto::UncheckedFrom::unchecked_from(p.public().to_bytes())
+	}
+}
+
+impl From<Account> for AlephAuthorityId {
 	fn from(p: Account) -> Self {
 		sp_application_crypto::UncheckedFrom::unchecked_from(p.public().to_bytes())
 	}

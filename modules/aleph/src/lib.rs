@@ -40,9 +40,6 @@ mod mock;
 
 use storage_types::StoredAuthoritySet;
 
-#[cfg(feature = "runtime-benchmarks")]
-pub mod benchmarking;
-
 // Re-export in crate namespace for `construct_runtime!`
 pub use pallet::*;
 
@@ -314,27 +311,6 @@ pub mod pallet {
 		fn get() -> Option<u32> {
 			Some(T::HeadersToKeep::get())
 		}
-	}
-
-	/// Initialize pallet so that it is ready for inserting new header.
-	///
-	/// The function makes sure that the new insertion will cause the pruning of some old header.
-	///
-	/// Returns parent header for the new header.
-	#[cfg(feature = "runtime-benchmarks")]
-	pub(crate) fn bootstrap_bridge<T: Config<I>, I: 'static>(
-		init_params: super::InitializationData<BridgedHeader<T, I>>,
-	) -> BridgedHeader<T, I> {
-		let start_header = init_params.header.clone();
-		initialize_bridge::<T, I>(init_params).expect("benchmarks are correct");
-
-		// the most obvious way to cause pruning during next insertion would be to insert
-		// `HeadersToKeep` headers. But it'll make our benchmarks slow. So we will just play with
-		// our pruning ring-buffer.
-		assert_eq!(ImportedHashesPointer::<T, I>::get(), 1);
-		ImportedHashesPointer::<T, I>::put(0);
-
-		*start_header
 	}
 }
 
