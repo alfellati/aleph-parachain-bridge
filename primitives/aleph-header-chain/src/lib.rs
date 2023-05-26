@@ -29,7 +29,6 @@ use sp_runtime::{traits::Header as HeaderT, ConsensusEngineId, KeyTypeId, Runtim
 use sp_std::boxed::Box;
 
 pub mod aleph_justification;
-pub mod storage_keys;
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"alp0");
 pub const ALEPH_ENGINE_ID: ConsensusEngineId = *b"FRNK";

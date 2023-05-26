@@ -347,7 +347,7 @@ mod tests {
 	};
 	use frame_support::{
 		assert_noop, assert_ok,
-		dispatch::PostDispatchInfo,
+		dispatch::PostDispatchInfo, storage::generator::StorageValue,
 	};
 	use sp_runtime::DispatchError;
 
@@ -451,5 +451,52 @@ mod tests {
 				Error::<TestRuntime>::TooManyAuthoritiesInSet,
 			);
 		});
+	}
+
+	#[test]
+	fn parse_finalized_storage_proof_rejects_proof_on_unknown_header() {
+		run_test(|| {
+			assert_noop!(
+				Pallet::<TestRuntime>::storage_proof_checker(Default::default(), vec![],)
+					.map(|_| ()),
+				bp_header_chain::HeaderChainError::UnknownHeader,
+			);
+		});
+	}
+
+	#[test]
+	fn parse_finalized_storage_accepts_valid_proof() {
+		run_test(|| {
+			let (state_root, storage_proof) = bp_runtime::craft_valid_storage_proof();
+
+			let mut header = test_header(2);
+			header.set_state_root(state_root);
+
+			let hash = header.hash();
+			<BestFinalized<TestRuntime>>::put(HeaderId(2, hash));
+			<ImportedHeaders<TestRuntime>>::insert(hash, header.build());
+
+			assert_ok!(
+				Pallet::<TestRuntime>::storage_proof_checker(hash, storage_proof).map(|_| ())
+			);
+		});
+	}
+
+	#[test]
+	fn storage_keys_computed_properly() {
+		assert_eq!(
+			PalletOperatingMode::<TestRuntime>::storage_value_final_key().to_vec(),
+			bp_header_chain::storage_keys::pallet_operating_mode_key("Aleph").0,
+		);
+
+		assert_eq!(
+			CurrentAuthoritySet::<TestRuntime>::storage_value_final_key().to_vec(),
+			bp_header_chain::storage_keys::current_authority_set_key("Aleph").0,
+		);
+
+		assert_eq!(
+			BestFinalized::<TestRuntime>::storage_value_final_key().to_vec(),
+			bp_header_chain::storage_keys::best_finalized_key("Aleph").0,
+		);
 	}
 }
