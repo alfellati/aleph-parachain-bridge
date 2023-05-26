@@ -1,0 +1,40 @@
+name: Test Code
+
+on:
+  pull_request:
+    branches:
+    - master
+  push:
+    branches:
+    - master
+
+jobs:
+  test-code:
+    runs-on: self-hosted
+    env:
+      RUST_BACKTRACE: full
+      RUSTC_WRAPPER: sccache
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Install Protoc
+      uses: arduino/setup-protoc@v1
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        components: rustfmt, clippy
+        target: wasm32-unknown-unknown
+        override: false
+        default: true
+
+    - name: Check and Lint Code
+      run: cargo +nightly clippy -- -D warnings
+
+    - name: Test Code
+      run: cargo test
