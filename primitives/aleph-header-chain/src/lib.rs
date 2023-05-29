@@ -14,9 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Defines traits which represent a common interface for Substrate pallets which want to
-//! incorporate bridge functionality.
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use bp_runtime::{BasicOperatingMode, Chain, HeaderOf};

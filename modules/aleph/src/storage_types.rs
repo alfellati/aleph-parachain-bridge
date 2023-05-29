@@ -29,7 +29,7 @@ use sp_std::marker::PhantomData;
 /// A list of AlephBFT authorities.
 pub type AuthorityList = Vec<AuthorityId>;
 
-/// A bounded list of AlephBFT authorities with associated weights.
+/// A bounded list of AlephBFT authorities.
 pub type StoredAuthorityList<MaxBridgedAuthorities> =
 	BoundedVec<AuthorityId, MaxBridgedAuthorities>;
 
@@ -42,7 +42,7 @@ impl<T: Config<I>, I: 'static> Get<u32> for StoredAuthorityListLimit<T, I> {
 	}
 }
 
-/// A bounded AlephBFT Authority List and ID.
+/// A wrapper around bounded AlephBFT Authority List.
 #[derive(Clone, Decode, Encode, TypeInfo, MaxEncodedLen, RuntimeDebugNoBound)]
 #[scale_info(skip_type_params(T, I))]
 pub struct StoredAuthoritySet<T: Config<I>, I: 'static> {
