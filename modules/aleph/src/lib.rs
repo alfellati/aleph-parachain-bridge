@@ -16,7 +16,7 @@
 
 
 
-// This pallet is largely based on the `GRANDPA` pallet, is changed to work with AlephBFT
+// This pallet is largely based on the `GRANDPA` pallet, but is changed to work with AlephBFT
 
 //! Aleph bridging Pallet
 //!
