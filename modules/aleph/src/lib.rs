@@ -101,7 +101,7 @@ pub mod pallet {
 		///
 		/// The initial configuration provided does not need to be the genesis header of the bridged
 		/// chain, it can be any arbitrary header. You can also provide the next scheduled set
-		/// change if it is already know.
+		/// change if it is already known.
 		///
 		/// This function is only allowed to be called from a trusted origin and writes to storage
 		/// with practically no checks in terms of the validity of the data. It is important that
