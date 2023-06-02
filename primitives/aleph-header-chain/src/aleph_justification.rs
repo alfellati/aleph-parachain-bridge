@@ -1,6 +1,5 @@
 use codec::{Decode, Encode};
-use sp_runtime::traits::Header as HeaderT;
-use sp_runtime::RuntimeDebug;
+use sp_runtime::{traits::Header as HeaderT, RuntimeDebug};
 
 use crate::AuthoritySignature;
 

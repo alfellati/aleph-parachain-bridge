@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU General Public License
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
-
-
 // This pallet is largely based on the `GRANDPA` pallet, but is changed to work with AlephBFT
 
 //! Aleph bridging Pallet
@@ -28,14 +26,14 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::large_enum_variant)]
 
-use bp_runtime::{BlockNumberOf, HashOf, HasherOf, HeaderId, HeaderOf, OwnedBridgeModule};
-use bp_header_chain::{HeaderChain, StoredHeaderData, StoredHeaderDataBuilder};
 use bp_aleph_header_chain::{ChainWithAleph, InitializationData};
+use bp_header_chain::{HeaderChain, StoredHeaderData, StoredHeaderDataBuilder};
+use bp_runtime::{BlockNumberOf, HashOf, HasherOf, HeaderId, HeaderOf, OwnedBridgeModule};
 use frame_support::sp_runtime::traits::Header;
 
-mod storage_types;
 #[cfg(test)]
 mod mock;
+mod storage_types;
 
 use storage_types::StoredAuthoritySet;
 
@@ -88,7 +86,6 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config<I>, I: 'static> Pallet<T, I> {
-
 		/// Bootstrap the bridge pallet with an initial header and authority set from which to sync.
 		///
 		/// The initial configuration provided does not need to be the genesis header of the bridged
@@ -98,9 +95,9 @@ pub mod pallet {
 		/// This function is only allowed to be called from a trusted origin and writes to storage
 		/// with practically no checks in terms of the validity of the data. It is important that
 		/// you ensure that valid data is being passed in.
-		/// 
+		///
 		/// Difference with GRANDPA: This function can only be called by root.
-		/// 
+		///
 		/// Note: It cannot be called once the bridge has been initialized.
 		/// To reinitialize the bridge, you must reinitialize the pallet.
 		#[pallet::call_index(1)]
@@ -242,7 +239,6 @@ pub mod pallet {
 		BridgeModule(bp_runtime::OwnedBridgeModuleError),
 	}
 
-
 	/// Import a previously verified header to the storage.
 	///
 	/// Note this function solely takes care of updating the storage and pruning old entries,
@@ -270,8 +266,7 @@ pub mod pallet {
 	fn initialize_bridge<T: Config<I>, I: 'static>(
 		init_params: super::InitializationData<BridgedHeader<T, I>>,
 	) -> Result<(), Error<T, I>> {
-		let super::InitializationData { header, authority_list, operating_mode } =
-			init_params;
+		let super::InitializationData { header, authority_list, operating_mode } = init_params;
 		let authority_set_length = authority_list.len();
 		let authority_set = StoredAuthoritySet::<T, I>::try_new(authority_list)
 			.map_err(|e| {
@@ -327,18 +322,14 @@ impl<T: Config<I>, I: 'static> HeaderChain<BridgedChain<T, I>> for AlephChainHea
 mod tests {
 	use super::*;
 	use crate::mock::{
-		run_test, test_header, RuntimeOrigin, System,
-		TestHeader, TestRuntime, MAX_BRIDGED_AUTHORITIES,
+		run_test, test_header, RuntimeOrigin, System, TestHeader, TestRuntime,
+		MAX_BRIDGED_AUTHORITIES,
 	};
 	use bp_aleph_header_chain::AuthorityId;
 	use bp_runtime::BasicOperatingMode;
-	use bp_test_utils::{
-		generate_owned_bridge_module_tests,
-		ALICE, BOB, CHARLIE, Account,
-	};
+	use bp_test_utils::{generate_owned_bridge_module_tests, Account, ALICE, BOB, CHARLIE};
 	use frame_support::{
-		assert_noop, assert_ok,
-		dispatch::PostDispatchInfo, storage::generator::StorageValue,
+		assert_noop, assert_ok, dispatch::PostDispatchInfo, storage::generator::StorageValue,
 	};
 	use sp_runtime::DispatchError;
 
@@ -433,7 +424,9 @@ mod tests {
 			let genesis = test_header(0);
 			let init_data = InitializationData {
 				header: Box::new(genesis),
-				authority_list: into_authority_set((0..(MAX_BRIDGED_AUTHORITIES as u16)+1).map(|x| Account(x)).collect()),
+				authority_list: into_authority_set(
+					(0..(MAX_BRIDGED_AUTHORITIES as u16) + 1).map(|x| Account(x)).collect(),
+				),
 				operating_mode: BasicOperatingMode::Normal,
 			};
 

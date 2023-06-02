@@ -16,13 +16,13 @@
 
 //! Utilities for working with test accounts.
 
+use bp_aleph_header_chain::AuthorityId as AlephAuthorityId;
 use codec::Encode;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signature};
 use finality_grandpa::voter_set::VoterSet;
 use sp_consensus_grandpa::{AuthorityId, AuthorityList, AuthorityWeight};
 use sp_runtime::RuntimeDebug;
 use sp_std::prelude::*;
-use bp_aleph_header_chain::AuthorityId as AlephAuthorityId;
 
 /// Set of test accounts with friendly names.
 pub const ALICE: Account = Account(0);
