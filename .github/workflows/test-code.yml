@@ -24,13 +24,24 @@ jobs:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Install Rust Toolchain
-        uses: Cardinal-Cryptography/github-actions/install-rust-toolchain@v1
-        with:
-          targets: wasm32-unknown-unknown
-          components: clippy rustfmt
+      uses: Cardinal-Cryptography/github-actions/install-rust-toolchain@v1
+      with:
+        targets: wasm32-unknown-unknown
+        components: clippy rustfmt
 
-    - name: Check and Lint Code
-      run: cargo clippy -- -D warnings
+    - name: Run Linter
+      uses: actions-rs/cargo@v1
+      with:
+        command: clippy
+        args: -- -D warnings
 
-    - name: Test Code
-      run: cargo test
+    - name: Run Unit Test Suite
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+
+    - name: Run Format Checks
+      uses: actions-rs/cargo@v1
+      with:
+        command: fmt
+        args: --all 
