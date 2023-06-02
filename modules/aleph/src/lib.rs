@@ -26,7 +26,6 @@
 //! being directly initialized with a header and authority set.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// Runtime-generated enums
 #![allow(clippy::large_enum_variant)]
 
 use bp_runtime::{BlockNumberOf, HashOf, HasherOf, HeaderId, HeaderOf, OwnedBridgeModule};
