@@ -57,12 +57,10 @@ pub struct InitializationData<H: HeaderT> {
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, TypeInfo)]
 #[allow(non_camel_case_types)]
 pub enum BridgeAlephCall<Header: HeaderT> {
-	/// `pallet-bridge-aleph::Call::initialize`
 	#[codec(index = 1)]
 	initialize { init_data: InitializationData<Header> },
 }
 
-/// The `BridgeAlephCall` used by a chain.
 pub type BridgeAlephCallOf<C> = BridgeAlephCall<HeaderOf<C>>;
 
 pub trait ChainWithAleph: Chain {

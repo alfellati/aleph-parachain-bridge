@@ -26,7 +26,6 @@ use scale_info::TypeInfo;
 use sp_std::marker::PhantomData;
 
 
-/// A list of AlephBFT authorities.
 pub type AuthorityList = Vec<AuthorityId>;
 
 /// A bounded list of AlephBFT authorities.

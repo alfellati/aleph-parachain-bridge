@@ -16,7 +16,7 @@
 
 
 
-// This pallet is largely based on the `GRANDPA` pallet, is changed to work with AlephBFT
+// This pallet is largely based on the `GRANDPA` pallet, but is changed to work with AlephBFT
 
 //! Aleph bridging Pallet
 //!
@@ -26,7 +26,6 @@
 //! being directly initialized with a header and authority set.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// Runtime-generated enums
 #![allow(clippy::large_enum_variant)]
 
 use bp_runtime::{BlockNumberOf, HashOf, HasherOf, HeaderId, HeaderOf, OwnedBridgeModule};
@@ -94,7 +93,7 @@ pub mod pallet {
 		///
 		/// The initial configuration provided does not need to be the genesis header of the bridged
 		/// chain, it can be any arbitrary header. You can also provide the next scheduled set
-		/// change if it is already know.
+		/// change if it is already known.
 		///
 		/// This function is only allowed to be called from a trusted origin and writes to storage
 		/// with practically no checks in terms of the validity of the data. It is important that
@@ -141,7 +140,7 @@ pub mod pallet {
 	pub type BestFinalized<T: Config<I>, I: 'static = ()> =
 		StorageValue<_, BridgedBlockId<T, I>, OptionQuery>;
 
-	/// A ring buffer of imported hashes. Ordered by the insertion time.
+	/// A ring buffer of imported hashes. Ordered by insertion time.
 	#[pallet::storage]
 	pub(super) type ImportedHashes<T: Config<I>, I: 'static = ()> = StorageMap<
 		Hasher = Identity,
@@ -175,7 +174,7 @@ pub mod pallet {
 
 	/// Optional pallet owner.
 	///
-	/// Pallet owner has a right to halt all pallet operations and then resume it. If it is
+	/// Pallet owner has the right to halt all pallet operations and then resume them. If it is
 	/// `None`, then there are no direct ways to halt/resume pallet operations, but other
 	/// runtime methods may still be used to do that (i.e. democracy::referendum to update halt
 	/// flag directly or call the `halt_operations`).
