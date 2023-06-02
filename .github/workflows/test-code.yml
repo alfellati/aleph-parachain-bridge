@@ -23,15 +23,11 @@ jobs:
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Install toolchain
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: nightly
-        components: rustfmt, clippy
-        target: wasm32-unknown-unknown
-        override: false
-        default: true
+    - name: Install Rust Toolchain
+        uses: Cardinal-Cryptography/github-actions/install-rust-toolchain@v1
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy rustfmt
 
     - name: Check and Lint Code
       run: cargo clippy -- -D warnings
