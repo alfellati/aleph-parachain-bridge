@@ -29,7 +29,6 @@ use bridge_runtime_common::{
 	messages_xcm_extension::{XcmBlobHauler, XcmBlobHaulerAdapter},
 };
 use frame_support::{parameter_types, weights::Weight, RuntimeDebug};
-use xcm::latest::prelude::*;
 use xcm_builder::HaulBlobExporter;
 
 /// Default lane that is used to send messages to Millau.
@@ -50,10 +49,6 @@ parameter_types! {
 /// Message payload for RialtoParachain -> Millau messages.
 pub type ToMillauMessagePayload = messages::source::FromThisChainMessagePayload;
 
-/// Message verifier for RialtoParachain -> Millau messages.
-pub type ToMillauMessageVerifier =
-	messages::source::FromThisChainMessageVerifier<WithMillauMessageBridge>;
-
 /// Message payload for Millau -> RialtoParachain messages.
 pub type FromMillauMessagePayload = messages::target::FromBridgedChainMessagePayload;
 
@@ -63,13 +58,6 @@ pub type FromMillauMessageDispatch =
 		crate::OnRialtoParachainBlobDispatcher,
 		(),
 	>;
-
-/// Messages proof for Millau -> RialtoParachain messages.
-pub type FromMillauMessagesProof = messages::target::FromBridgedChainMessagesProof<bp_millau::Hash>;
-
-/// Messages delivery proof for RialtoParachain -> Millau messages.
-pub type ToMillauMessagesDeliveryProof =
-	messages::source::FromBridgedChainMessagesDeliveryProof<bp_millau::Hash>;
 
 /// Maximal outbound payload size of Rialto -> Millau messages.
 pub type ToMillauMaximalOutboundPayloadSize =
@@ -124,11 +112,6 @@ pub struct ToMillauXcmBlobHauler;
 
 impl XcmBlobHauler for ToMillauXcmBlobHauler {
 	type MessageSender = pallet_bridge_messages::Pallet<Runtime, WithMillauMessagesInstance>;
-	type MessageSenderOrigin = RuntimeOrigin;
-
-	fn message_sender_origin() -> RuntimeOrigin {
-		pallet_xcm::Origin::from(MultiLocation::new(1, crate::UniversalLocation::get())).into()
-	}
 
 	fn xcm_lane() -> LaneId {
 		XCM_LANE

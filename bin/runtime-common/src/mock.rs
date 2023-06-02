@@ -26,9 +26,9 @@
 use crate::messages::{
 	source::{
 		FromThisChainMaximalOutboundPayloadSize, FromThisChainMessagePayload,
-		FromThisChainMessageVerifier, TargetHeaderChainAdapter,
+		TargetHeaderChainAdapter,
 	},
-	target::{FromBridgedChainMessagePayload, SourceHeaderChainAdapter},
+	target::SourceHeaderChainAdapter,
 	BridgedChainWithMessages, HashOf, MessageBridge, ThisChainWithMessages,
 };
 
@@ -41,6 +41,7 @@ use codec::{Decode, Encode};
 use frame_support::{
 	parameter_types,
 	weights::{ConstantMultiplier, IdentityFee, RuntimeDbWeight, Weight},
+	StateVersion,
 };
 use pallet_transaction_payment::Multiplier;
 use sp_runtime::{
@@ -190,7 +191,7 @@ impl pallet_balances::Config for TestRuntime {
 	type MaxLocks = ConstU32<50>;
 	type MaxReserves = ConstU32<50>;
 	type ReserveIdentifier = [u8; 8];
-	type HoldIdentifier = ();
+	type RuntimeHoldReason = RuntimeHoldReason;
 	type FreezeIdentifier = ();
 	type MaxHolds = ConstU32<0>;
 	type MaxFreezes = ConstU32<0>;
@@ -240,12 +241,11 @@ impl pallet_bridge_messages::Config for TestRuntime {
 	type MaximalOutboundPayloadSize = FromThisChainMaximalOutboundPayloadSize<OnThisChainBridge>;
 	type OutboundPayload = FromThisChainMessagePayload;
 
-	type InboundPayload = FromBridgedChainMessagePayload;
+	type InboundPayload = Vec<u8>;
 	type InboundRelayer = BridgedChainAccountId;
 	type DeliveryPayments = ();
 
 	type TargetHeaderChain = TargetHeaderChainAdapter<OnThisChainBridge>;
-	type LaneMessageVerifier = FromThisChainMessageVerifier<OnThisChainBridge>;
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		TestRuntime,
 		(),
@@ -253,7 +253,7 @@ impl pallet_bridge_messages::Config for TestRuntime {
 	>;
 
 	type SourceHeaderChain = SourceHeaderChainAdapter<OnThisChainBridge>;
-	type MessageDispatch = ForbidInboundMessages<(), FromBridgedChainMessagePayload>;
+	type MessageDispatch = ForbidInboundMessages<(), Vec<u8>>;
 	type BridgedChainId = BridgedChainId;
 }
 
@@ -327,6 +327,8 @@ impl Chain for ThisUnderlyingChain {
 	type Index = u32;
 	type Signature = sp_runtime::MultiSignature;
 
+	const STATE_VERSION: StateVersion = StateVersion::V1;
+
 	fn max_extrinsic_size() -> u32 {
 		BRIDGED_CHAIN_MAX_EXTRINSIC_SIZE
 	}
@@ -367,6 +369,8 @@ impl Chain for BridgedUnderlyingChain {
 	type Index = u32;
 	type Signature = sp_runtime::MultiSignature;
 
+	const STATE_VERSION: StateVersion = StateVersion::V1;
+
 	fn max_extrinsic_size() -> u32 {
 		BRIDGED_CHAIN_MAX_EXTRINSIC_SIZE
 	}
@@ -392,6 +396,8 @@ impl Chain for BridgedUnderlyingParachain {
 	type Balance = BridgedChainBalance;
 	type Index = u32;
 	type Signature = sp_runtime::MultiSignature;
+
+	const STATE_VERSION: StateVersion = StateVersion::V1;
 
 	fn max_extrinsic_size() -> u32 {
 		BRIDGED_CHAIN_MAX_EXTRINSIC_SIZE

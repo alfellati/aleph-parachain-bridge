@@ -20,21 +20,21 @@
 //! pallet is used to dispatch incoming messages. Message identified by a tuple
 //! of to elements - message lane id and message nonce.
 
-pub use bp_runtime::{RangeInclusiveExt, UnderlyingChainOf, UnderlyingChainProvider};
-
 use bp_header_chain::HeaderChain;
 use bp_messages::{
-	source_chain::{LaneMessageVerifier, TargetHeaderChain},
-	target_chain::{ProvedLaneMessages, ProvedMessages, SourceHeaderChain},
+	source_chain::{FromBridgedChainMessagesDeliveryProof, TargetHeaderChain},
+	target_chain::{
+		FromBridgedChainMessagesProof, ProvedLaneMessages, ProvedMessages, SourceHeaderChain,
+	},
 	InboundLaneData, LaneId, Message, MessageKey, MessageNonce, MessagePayload, OutboundLaneData,
 	VerificationError,
 };
-use bp_runtime::{Chain, RawStorageProof, Size, StorageProofChecker};
-use codec::{Decode, Encode};
-use frame_support::{traits::Get, weights::Weight, RuntimeDebug};
-use hash_db::Hasher;
-use scale_info::TypeInfo;
-use sp_std::{convert::TryFrom, marker::PhantomData, vec::Vec};
+pub use bp_runtime::{
+	Chain, RangeInclusiveExt, RawStorageProof, Size, TrustedVecDb, UnderlyingChainOf,
+	UnderlyingChainProvider, UntrustedVecDb,
+};
+use frame_support::{traits::Get, weights::Weight};
+use sp_std::{marker::PhantomData, vec::Vec};
 
 /// Bidirectional message bridge.
 pub trait MessageBridge {
@@ -91,77 +91,9 @@ pub mod source {
 		}
 	}
 
-	/// Messages delivery proof from bridged chain:
-	///
-	/// - hash of finalized header;
-	/// - storage proof of inbound lane state;
-	/// - lane id.
-	#[derive(Clone, Decode, Encode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-	pub struct FromBridgedChainMessagesDeliveryProof<BridgedHeaderHash> {
-		/// Hash of the bridge header the proof is for.
-		pub bridged_header_hash: BridgedHeaderHash,
-		/// Storage trie proof generated for [`Self::bridged_header_hash`].
-		pub storage_proof: RawStorageProof,
-		/// Lane id of which messages were delivered and the proof is for.
-		pub lane: LaneId,
-	}
-
-	impl<BridgedHeaderHash> Size for FromBridgedChainMessagesDeliveryProof<BridgedHeaderHash> {
-		fn size(&self) -> u32 {
-			u32::try_from(
-				self.storage_proof
-					.iter()
-					.fold(0usize, |sum, node| sum.saturating_add(node.len())),
-			)
-			.unwrap_or(u32::MAX)
-		}
-	}
-
 	/// 'Parsed' message delivery proof - inbound lane id and its state.
 	pub type ParsedMessagesDeliveryProofFromBridgedChain<B> =
 		(LaneId, InboundLaneData<AccountIdOf<ThisChain<B>>>);
-
-	/// Message verifier that is doing all basic checks.
-	///
-	/// This verifier assumes following:
-	///
-	/// - all message lanes are equivalent, so all checks are the same;
-	///
-	/// Following checks are made:
-	///
-	/// - message is rejected if its lane is currently blocked;
-	/// - message is rejected if there are too many pending (undelivered) messages at the outbound
-	///   lane;
-	/// - check that the sender has rights to dispatch the call on target chain using provided
-	///   dispatch origin;
-	/// - check that the sender has paid enough funds for both message delivery and dispatch.
-	#[derive(RuntimeDebug)]
-	pub struct FromThisChainMessageVerifier<B>(PhantomData<B>);
-
-	impl<B> LaneMessageVerifier<OriginOf<ThisChain<B>>, FromThisChainMessagePayload>
-		for FromThisChainMessageVerifier<B>
-	where
-		B: MessageBridge,
-		// matches requirements from the `frame_system::Config::Origin`
-		OriginOf<ThisChain<B>>: Clone
-			+ Into<Result<frame_system::RawOrigin<AccountIdOf<ThisChain<B>>>, OriginOf<ThisChain<B>>>>,
-		AccountIdOf<ThisChain<B>>: PartialEq + Clone,
-	{
-		fn verify_message(
-			_submitter: &OriginOf<ThisChain<B>>,
-			_lane: &LaneId,
-			_lane_outbound_data: &OutboundLaneData,
-			_payload: &FromThisChainMessagePayload,
-		) -> Result<(), VerificationError> {
-			// IMPORTANT: any error that is returned here is fatal for the bridge, because
-			// this code is executed at the bridge hub and message sender actually lives
-			// at some sibling parachain. So we are failing **after** the message has been
-			// sent and we can't report it back to sender (unless error report mechanism is
-			// embedded into message and its dispatcher).
-
-			Ok(())
-		}
-	}
 
 	/// Return maximal message size of This -> Bridged chain message.
 	pub fn maximal_message_size<B: MessageBridge>() -> u32 {
@@ -192,8 +124,7 @@ pub mod source {
 	/// Do basic Bridged-chain specific verification of This -> Bridged chain message.
 	///
 	/// Ok result from this function means that the delivery transaction with this message
-	/// may be 'mined' by the target chain. But the lane may have its own checks (e.g. fee
-	/// check) that would reject message (see `FromThisChainMessageVerifier`).
+	/// may be 'mined' by the target chain.
 	pub fn verify_chain_message<B: MessageBridge>(
 		payload: &FromThisChainMessagePayload,
 	) -> Result<(), VerificationError> {
@@ -260,37 +191,6 @@ pub mod target {
 	/// Decoded Bridged -> This message payload.
 	pub type FromBridgedChainMessagePayload = crate::messages_xcm_extension::XcmAsPlainPayload;
 
-	/// Messages proof from bridged chain:
-	///
-	/// - hash of finalized header;
-	/// - storage proof of messages and (optionally) outbound lane state;
-	/// - lane id;
-	/// - nonces (inclusive range) of messages which are included in this proof.
-	#[derive(Clone, Decode, Encode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-	pub struct FromBridgedChainMessagesProof<BridgedHeaderHash> {
-		/// Hash of the finalized bridged header the proof is for.
-		pub bridged_header_hash: BridgedHeaderHash,
-		/// A storage trie proof of messages being delivered.
-		pub storage_proof: RawStorageProof,
-		/// Messages in this proof are sent over this lane.
-		pub lane: LaneId,
-		/// Nonce of the first message being delivered.
-		pub nonces_start: MessageNonce,
-		/// Nonce of the last message being delivered.
-		pub nonces_end: MessageNonce,
-	}
-
-	impl<BridgedHeaderHash> Size for FromBridgedChainMessagesProof<BridgedHeaderHash> {
-		fn size(&self) -> u32 {
-			u32::try_from(
-				self.storage_proof
-					.iter()
-					.fold(0usize, |sum, node| sum.saturating_add(node.len())),
-			)
-			.unwrap_or(u32::MAX)
-		}
-	}
-
 	/// Return maximal dispatch weight of the message we're able to receive.
 	pub fn maximal_incoming_message_dispatch_weight(maximal_extrinsic_weight: Weight) -> Weight {
 		maximal_extrinsic_weight / 2
@@ -329,15 +229,14 @@ pub mod target {
 	) -> Result<ProvedMessages<Message>, VerificationError> {
 		let FromBridgedChainMessagesProof {
 			bridged_header_hash,
-			storage_proof,
+			storage,
 			lane,
 			nonces_start,
 			nonces_end,
 		} = proof;
-		let storage =
-			B::BridgedHeaderChain::storage_proof_checker(bridged_header_hash, storage_proof)
-				.map_err(VerificationError::HeaderChain)?;
-		let mut parser = StorageProofCheckerAdapter::<_, B> { storage, _dummy: Default::default() };
+		let storage = B::BridgedHeaderChain::verify_vec_db_storage(bridged_header_hash, storage)
+			.map_err(VerificationError::HeaderChain)?;
+		let mut parser = StorageAdapter::<B> { storage, _dummy: Default::default() };
 		let nonces_range = nonces_start..=nonces_end;
 
 		// receiving proofs where end < begin is ok (if proof includes outbound lane state)
@@ -369,11 +268,8 @@ pub mod target {
 			return Err(VerificationError::EmptyMessageProof)
 		}
 
-		// check that the storage proof doesn't have any untouched trie nodes
-		parser
-			.storage
-			.ensure_no_unused_nodes()
-			.map_err(VerificationError::StorageProof)?;
+		// Check that the `VecDb` doesn't have any untouched keys.
+		parser.storage.ensure_no_unused_keys().map_err(VerificationError::VecDb)?;
 
 		// We only support single lane messages in this generated_schema
 		let mut proved_messages = ProvedMessages::new();
@@ -382,12 +278,12 @@ pub mod target {
 		Ok(proved_messages)
 	}
 
-	struct StorageProofCheckerAdapter<H: Hasher, B> {
-		storage: StorageProofChecker<H>,
+	struct StorageAdapter<B> {
+		storage: TrustedVecDb,
 		_dummy: sp_std::marker::PhantomData<B>,
 	}
 
-	impl<H: Hasher, B: MessageBridge> StorageProofCheckerAdapter<H, B> {
+	impl<B: MessageBridge> StorageAdapter<B> {
 		fn read_and_decode_outbound_lane_data(
 			&mut self,
 			lane_id: &LaneId,
@@ -398,7 +294,7 @@ pub mod target {
 			);
 
 			self.storage
-				.read_and_decode_opt_value(storage_outbound_lane_data_key.0.as_ref())
+				.get_and_decode_optional(&storage_outbound_lane_data_key)
 				.map_err(VerificationError::OutboundLaneStorage)
 		}
 
@@ -412,7 +308,7 @@ pub mod target {
 				message_key.nonce,
 			);
 			self.storage
-				.read_and_decode_mandatory_value(storage_message_key.0.as_ref())
+				.get_and_decode_mandatory(&storage_message_key)
 				.map_err(VerificationError::MessageStorage)
 		}
 	}
@@ -421,8 +317,8 @@ pub mod target {
 /// The `BridgeMessagesCall` used by a chain.
 pub type BridgeMessagesCallOf<C> = bp_messages::BridgeMessagesCall<
 	bp_runtime::AccountIdOf<C>,
-	target::FromBridgedChainMessagesProof<bp_runtime::HashOf<C>>,
-	source::FromBridgedChainMessagesDeliveryProof<bp_runtime::HashOf<C>>,
+	FromBridgedChainMessagesProof<bp_runtime::HashOf<C>>,
+	bp_messages::source_chain::FromBridgedChainMessagesDeliveryProof<bp_runtime::HashOf<C>>,
 >;
 
 #[cfg(test)]
@@ -435,7 +331,7 @@ mod tests {
 		mock::*,
 	};
 	use bp_header_chain::{HeaderChainError, StoredHeaderDataBuilder};
-	use bp_runtime::{HeaderId, StorageProofError};
+	use bp_runtime::{HeaderId, VecDbError};
 	use codec::Encode;
 	use sp_core::H256;
 	use sp_runtime::traits::Header as _;
@@ -477,9 +373,11 @@ mod tests {
 		outbound_lane_data: Option<OutboundLaneData>,
 		encode_message: impl Fn(MessageNonce, &MessagePayload) -> Option<Vec<u8>>,
 		encode_outbound_lane_data: impl Fn(&OutboundLaneData) -> Vec<u8>,
-		test: impl Fn(target::FromBridgedChainMessagesProof<H256>) -> R,
+		add_duplicate_key: bool,
+		add_unused_key: bool,
+		test: impl Fn(FromBridgedChainMessagesProof<H256>) -> R,
 	) -> R {
-		let (state_root, storage_proof) = prepare_messages_storage_proof::<OnThisChainBridge>(
+		let (state_root, storage) = prepare_messages_storage_proof::<OnThisChainBridge>(
 			TEST_LANE_ID,
 			1..=nonces_end,
 			outbound_lane_data,
@@ -487,6 +385,8 @@ mod tests {
 			vec![42],
 			encode_message,
 			encode_outbound_lane_data,
+			add_duplicate_key,
+			add_unused_key,
 		);
 
 		sp_io::TestExternalities::new(Default::default()).execute_with(move || {
@@ -507,9 +407,9 @@ mod tests {
 				bridged_header_hash,
 				bridged_header.build(),
 			);
-			test(target::FromBridgedChainMessagesProof {
+			test(FromBridgedChainMessagesProof {
 				bridged_header_hash,
-				storage_proof,
+				storage,
 				lane: TEST_LANE_ID,
 				nonces_start: 1,
 				nonces_end,
@@ -520,9 +420,15 @@ mod tests {
 	#[test]
 	fn messages_proof_is_rejected_if_declared_less_than_actual_number_of_messages() {
 		assert_eq!(
-			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |proof| {
-				target::verify_messages_proof::<OnThisChainBridge>(proof, 5)
-			}),
+			using_messages_proof(
+				10,
+				None,
+				encode_all_messages,
+				encode_lane_data,
+				false,
+				false,
+				|proof| { target::verify_messages_proof::<OnThisChainBridge>(proof, 5) }
+			),
 			Err(VerificationError::MessagesCountMismatch),
 		);
 	}
@@ -530,9 +436,15 @@ mod tests {
 	#[test]
 	fn messages_proof_is_rejected_if_declared_more_than_actual_number_of_messages() {
 		assert_eq!(
-			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |proof| {
-				target::verify_messages_proof::<OnThisChainBridge>(proof, 15)
-			}),
+			using_messages_proof(
+				10,
+				None,
+				encode_all_messages,
+				encode_lane_data,
+				false,
+				false,
+				|proof| { target::verify_messages_proof::<OnThisChainBridge>(proof, 15) }
+			),
 			Err(VerificationError::MessagesCountMismatch),
 		);
 	}
@@ -540,12 +452,22 @@ mod tests {
 	#[test]
 	fn message_proof_is_rejected_if_header_is_missing_from_the_chain() {
 		assert_eq!(
-			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |proof| {
-				let bridged_header_hash =
-					pallet_bridge_grandpa::BestFinalized::<TestRuntime>::get().unwrap().1;
-				pallet_bridge_grandpa::ImportedHeaders::<TestRuntime>::remove(bridged_header_hash);
-				target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
-			}),
+			using_messages_proof(
+				10,
+				None,
+				encode_all_messages,
+				encode_lane_data,
+				false,
+				false,
+				|proof| {
+					let bridged_header_hash =
+						pallet_bridge_grandpa::BestFinalized::<TestRuntime>::get().unwrap().1;
+					pallet_bridge_grandpa::ImportedHeaders::<TestRuntime>::remove(
+						bridged_header_hash,
+					);
+					target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
+				}
+			),
 			Err(VerificationError::HeaderChain(HeaderChainError::UnknownHeader)),
 		);
 	}
@@ -553,51 +475,63 @@ mod tests {
 	#[test]
 	fn message_proof_is_rejected_if_header_state_root_mismatches() {
 		assert_eq!(
-			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |proof| {
-				let bridged_header_hash =
-					pallet_bridge_grandpa::BestFinalized::<TestRuntime>::get().unwrap().1;
-				pallet_bridge_grandpa::ImportedHeaders::<TestRuntime>::insert(
-					bridged_header_hash,
-					BridgedChainHeader::new(
-						0,
-						Default::default(),
-						Default::default(),
-						Default::default(),
-						Default::default(),
-					)
-					.build(),
-				);
-				target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
-			}),
-			Err(VerificationError::HeaderChain(HeaderChainError::StorageProof(
-				StorageProofError::StorageRootMismatch
-			))),
+			using_messages_proof(
+				10,
+				None,
+				encode_all_messages,
+				encode_lane_data,
+				false,
+				false,
+				|proof| {
+					let bridged_header_hash =
+						pallet_bridge_grandpa::BestFinalized::<TestRuntime>::get().unwrap().1;
+					pallet_bridge_grandpa::ImportedHeaders::<TestRuntime>::insert(
+						bridged_header_hash,
+						BridgedChainHeader::new(
+							0,
+							Default::default(),
+							Default::default(),
+							Default::default(),
+							Default::default(),
+						)
+						.build(),
+					);
+					target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
+				}
+			),
+			Err(VerificationError::HeaderChain(HeaderChainError::VecDb(VecDbError::InvalidProof))),
 		);
 	}
 
 	#[test]
 	fn message_proof_is_rejected_if_it_has_duplicate_trie_nodes() {
 		assert_eq!(
-			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |mut proof| {
-				let node = proof.storage_proof.pop().unwrap();
-				proof.storage_proof.push(node.clone());
-				proof.storage_proof.push(node);
-				target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
-			},),
-			Err(VerificationError::HeaderChain(HeaderChainError::StorageProof(
-				StorageProofError::DuplicateNodesInProof
-			))),
+			using_messages_proof(
+				10,
+				None,
+				encode_all_messages,
+				encode_lane_data,
+				true,
+				false,
+				|proof| { target::verify_messages_proof::<OnThisChainBridge>(proof, 10) },
+			),
+			Err(VerificationError::HeaderChain(HeaderChainError::VecDb(VecDbError::InvalidProof))),
 		);
 	}
 
 	#[test]
 	fn message_proof_is_rejected_if_it_has_unused_trie_nodes() {
 		assert_eq!(
-			using_messages_proof(10, None, encode_all_messages, encode_lane_data, |mut proof| {
-				proof.storage_proof.push(vec![42]);
-				target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
-			},),
-			Err(VerificationError::StorageProof(StorageProofError::UnusedNodesInTheProof)),
+			using_messages_proof(
+				10,
+				None,
+				encode_all_messages,
+				encode_lane_data,
+				false,
+				true,
+				|proof| { target::verify_messages_proof::<OnThisChainBridge>(proof, 10) },
+			),
+			Err(VerificationError::VecDb(VecDbError::UnusedKey)),
 		);
 	}
 
@@ -609,9 +543,11 @@ mod tests {
 				None,
 				|n, m| if n != 5 { Some(m.encode()) } else { None },
 				encode_lane_data,
+				false,
+				false,
 				|proof| target::verify_messages_proof::<OnThisChainBridge>(proof, 10)
 			),
-			Err(VerificationError::MessageStorage(StorageProofError::StorageValueEmpty)),
+			Err(VerificationError::MessageStorage(VecDbError::EmptyVal)),
 		);
 	}
 
@@ -629,9 +565,11 @@ mod tests {
 					Some(m)
 				},
 				encode_lane_data,
+				false,
+				false,
 				|proof| target::verify_messages_proof::<OnThisChainBridge>(proof, 10),
 			),
-			Err(VerificationError::MessageStorage(StorageProofError::StorageValueDecodeFailed(_))),
+			Err(VerificationError::MessageStorage(VecDbError::DecodeError)),
 		);
 	}
 
@@ -651,20 +589,26 @@ mod tests {
 					d.truncate(1);
 					d
 				},
+				false,
+				false,
 				|proof| target::verify_messages_proof::<OnThisChainBridge>(proof, 10),
 			),
-			Err(VerificationError::OutboundLaneStorage(
-				StorageProofError::StorageValueDecodeFailed(_)
-			)),
+			Err(VerificationError::OutboundLaneStorage(VecDbError::DecodeError)),
 		);
 	}
 
 	#[test]
 	fn message_proof_is_rejected_if_it_is_empty() {
 		assert_eq!(
-			using_messages_proof(0, None, encode_all_messages, encode_lane_data, |proof| {
-				target::verify_messages_proof::<OnThisChainBridge>(proof, 0)
-			},),
+			using_messages_proof(
+				0,
+				None,
+				encode_all_messages,
+				encode_lane_data,
+				false,
+				false,
+				|proof| { target::verify_messages_proof::<OnThisChainBridge>(proof, 0) },
+			),
 			Err(VerificationError::EmptyMessageProof),
 		);
 	}
@@ -681,6 +625,8 @@ mod tests {
 				}),
 				encode_all_messages,
 				encode_lane_data,
+				false,
+				false,
 				|proof| target::verify_messages_proof::<OnThisChainBridge>(proof, 0),
 			),
 			Ok(vec![(
@@ -711,6 +657,8 @@ mod tests {
 				}),
 				encode_all_messages,
 				encode_lane_data,
+				false,
+				false,
 				|proof| target::verify_messages_proof::<OnThisChainBridge>(proof, 1),
 			),
 			Ok(vec![(
@@ -735,10 +683,18 @@ mod tests {
 	#[test]
 	fn verify_messages_proof_does_not_panic_if_messages_count_mismatches() {
 		assert_eq!(
-			using_messages_proof(1, None, encode_all_messages, encode_lane_data, |mut proof| {
-				proof.nonces_end = u64::MAX;
-				target::verify_messages_proof::<OnThisChainBridge>(proof, u32::MAX)
-			},),
+			using_messages_proof(
+				1,
+				None,
+				encode_all_messages,
+				encode_lane_data,
+				false,
+				false,
+				|mut proof| {
+					proof.nonces_end = u64::MAX;
+					target::verify_messages_proof::<OnThisChainBridge>(proof, u32::MAX)
+				},
+			),
 			Err(VerificationError::MessagesCountMismatch),
 		);
 	}

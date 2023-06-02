@@ -20,16 +20,16 @@
 #![cfg(feature = "runtime-benchmarks")]
 
 use crate::{
-	messages::{
-		source::FromBridgedChainMessagesDeliveryProof, target::FromBridgedChainMessagesProof,
-		AccountIdOf, BridgedChain, HashOf, HasherOf, MessageBridge, ThisChain,
-	},
+	messages::{AccountIdOf, BridgedChain, HashOf, HasherOf, MessageBridge, ThisChain},
 	messages_generation::{
 		encode_all_messages, encode_lane_data, grow_trie_leaf_value, prepare_messages_storage_proof,
 	},
 };
 
-use bp_messages::storage_keys;
+use bp_messages::{
+	source_chain::FromBridgedChainMessagesDeliveryProof, storage_keys,
+	target_chain::FromBridgedChainMessagesProof,
+};
 use bp_polkadot_core::parachains::ParaHash;
 use bp_runtime::{
 	record_all_trie_keys, Chain, Parachain, RawStorageProof, StorageProofSize, UnderlyingChainOf,
@@ -92,7 +92,7 @@ where
 	B: MessageBridge,
 {
 	// prepare storage proof
-	let (state_root, storage_proof) = prepare_messages_storage_proof::<B>(
+	let (state_root, storage) = prepare_messages_storage_proof::<B>(
 		params.lane,
 		params.message_nonces.clone(),
 		params.outbound_lane_data.clone(),
@@ -100,6 +100,8 @@ where
 		prepare_inbound_message(&params, message_destination),
 		encode_all_messages,
 		encode_lane_data,
+		false,
+		false,
 	);
 
 	// update runtime storage
@@ -108,7 +110,7 @@ where
 	(
 		FromBridgedChainMessagesProof {
 			bridged_header_hash,
-			storage_proof,
+			storage,
 			lane: params.lane,
 			nonces_start: *params.message_nonces.start(),
 			nonces_end: *params.message_nonces.end(),
@@ -136,7 +138,7 @@ where
 	UnderlyingChainOf<BridgedChain<B>>: Chain<Hash = ParaHash> + Parachain,
 {
 	// prepare storage proof
-	let (state_root, storage_proof) = prepare_messages_storage_proof::<B>(
+	let (state_root, storage) = prepare_messages_storage_proof::<B>(
 		params.lane,
 		params.message_nonces.clone(),
 		params.outbound_lane_data.clone(),
@@ -144,6 +146,8 @@ where
 		prepare_inbound_message(&params, message_destination),
 		encode_all_messages,
 		encode_lane_data,
+		false,
+		false,
 	);
 
 	// update runtime storage
@@ -153,7 +157,7 @@ where
 	(
 		FromBridgedChainMessagesProof {
 			bridged_header_hash,
-			storage_proof,
+			storage,
 			lane: params.lane,
 			nonces_start: *params.message_nonces.start(),
 			nonces_end: *params.message_nonces.end(),

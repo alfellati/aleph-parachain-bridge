@@ -304,7 +304,7 @@ impl pallet_balances::Config for Runtime {
 	type MaxLocks = ConstU32<50>;
 	type MaxReserves = ConstU32<50>;
 	type ReserveIdentifier = [u8; 8];
-	type HoldIdentifier = ();
+	type RuntimeHoldReason = RuntimeHoldReason;
 	type FreezeIdentifier = ();
 	type MaxHolds = ConstU32<0>;
 	type MaxFreezes = ConstU32<0>;
@@ -578,7 +578,6 @@ impl pallet_bridge_messages::Config<WithMillauMessagesInstance> for Runtime {
 	type DeliveryPayments = ();
 
 	type TargetHeaderChain = crate::millau_messages::MillauAsTargetHeaderChain;
-	type LaneMessageVerifier = crate::millau_messages::ToMillauMessageVerifier;
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		Runtime,
 		WithMillauMessagesInstance,
@@ -856,6 +855,7 @@ mod tests {
 		target_chain::{DispatchMessage, DispatchMessageData, MessageDispatch},
 		LaneId, MessageKey,
 	};
+	use bp_runtime::Chain;
 	use bridge_runtime_common::{
 		integrity::check_additional_signed, messages_xcm_extension::XcmBlobMessageDispatchResult,
 	};
@@ -877,6 +877,14 @@ mod tests {
 			xcm: vec![Instruction::Trap(42)].into(),
 		}]
 		.into()
+	}
+
+	#[test]
+	fn runtime_version() {
+		assert_eq!(
+			VERSION.state_version,
+			bp_rialto_parachain::RialtoParachain::STATE_VERSION as u8
+		);
 	}
 
 	#[test]

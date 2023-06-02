@@ -647,16 +647,17 @@ where
 mod tests {
 	use super::*;
 	use crate::{
-		messages::{
-			source::FromBridgedChainMessagesDeliveryProof, target::FromBridgedChainMessagesProof,
-		},
 		messages_call_ext::{
 			BaseMessagesProofInfo, ReceiveMessagesDeliveryProofInfo, ReceiveMessagesProofInfo,
 			UnrewardedRelayerOccupation,
 		},
 		mock::*,
 	};
-	use bp_messages::{InboundLaneData, MessageNonce, OutboundLaneData, UnrewardedRelayersState};
+	use bp_messages::{
+		source_chain::FromBridgedChainMessagesDeliveryProof,
+		target_chain::FromBridgedChainMessagesProof, InboundLaneData, MessageNonce,
+		OutboundLaneData, UnrewardedRelayersState,
+	};
 	use bp_parachains::{BestParaHeadHash, ParaInfo};
 	use bp_polkadot_core::parachains::{ParaHeadsProof, ParaId};
 	use bp_runtime::HeaderId;
@@ -798,7 +799,7 @@ mod tests {
 			relayer_id_at_bridged_chain: relayer_account_at_bridged_chain(),
 			proof: FromBridgedChainMessagesProof {
 				bridged_header_hash: Default::default(),
-				storage_proof: vec![],
+				storage: Default::default(),
 				lane: TestLaneId::get(),
 				nonces_start: pallet_bridge_messages::InboundLanes::<TestRuntime>::get(
 					TEST_LANE_ID,

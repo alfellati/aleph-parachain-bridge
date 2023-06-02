@@ -24,7 +24,7 @@ use bp_messages::*;
 use bp_runtime::{
 	decl_bridge_finality_runtime_apis, decl_bridge_messages_runtime_apis, Chain, Parachain,
 };
-use frame_support::{dispatch::DispatchClass, RuntimeDebug};
+use frame_support::{dispatch::DispatchClass, RuntimeDebug, StateVersion};
 use sp_std::prelude::*;
 
 /// BridgeHubWococo parachain.
@@ -42,6 +42,8 @@ impl Chain for BridgeHubWococo {
 	type Index = Index;
 	type Signature = Signature;
 
+	const STATE_VERSION: StateVersion = StateVersion::V1;
+
 	fn max_extrinsic_size() -> u32 {
 		*BlockLength::get().max.get(DispatchClass::Normal)
 	}
@@ -56,6 +58,16 @@ impl Chain for BridgeHubWococo {
 
 impl Parachain for BridgeHubWococo {
 	const PARACHAIN_ID: u32 = BRIDGE_HUB_WOCOCO_PARACHAIN_ID;
+}
+
+impl ChainWithMessages for BridgeHubWococo {
+	const WITH_CHAIN_MESSAGES_PALLET_NAME: &'static str =
+		WITH_BRIDGE_HUB_WOCOCO_MESSAGES_PALLET_NAME;
+
+	const MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX: MessageNonce =
+		MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
+	const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce =
+		MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
 }
 
 /// Identifier of BridgeHubWococo in the Wococo relay chain.

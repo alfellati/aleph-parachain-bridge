@@ -146,6 +146,7 @@ impl_opaque_keys! {
 }
 
 /// This runtime version.
+#[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: create_runtime_str!("millau-runtime"),
 	impl_name: create_runtime_str!("millau-runtime"),
@@ -254,17 +255,15 @@ impl pallet_grandpa::Config for Runtime {
 mod mmr {
 	use super::Runtime;
 	pub use pallet_mmr::primitives::*;
-	use sp_runtime::traits::Keccak256;
 
 	pub type Leaf = <<Runtime as pallet_mmr::Config>::LeafData as LeafDataProvider>::LeafData;
-	pub type Hash = <Keccak256 as sp_runtime::traits::Hash>::Output;
 	pub type Hashing = <Runtime as pallet_mmr::Config>::Hashing;
+	pub type Hash = <Hashing as sp_runtime::traits::Hash>::Output;
 }
 
 impl pallet_mmr::Config for Runtime {
 	const INDEXING_PREFIX: &'static [u8] = b"mmr";
 	type Hashing = Keccak256;
-	type Hash = mmr::Hash;
 	type OnNewRoot = pallet_beefy_mmr::DepositBeefyDigest<Runtime>;
 	type WeightInfo = ();
 	type LeafData = pallet_beefy_mmr::Pallet<Runtime>;
@@ -332,7 +331,7 @@ impl pallet_balances::Config for Runtime {
 	type MaxLocks = ConstU32<50>;
 	type MaxReserves = ConstU32<50>;
 	type ReserveIdentifier = [u8; 8];
-	type HoldIdentifier = ();
+	type RuntimeHoldReason = RuntimeHoldReason;
 	type FreezeIdentifier = ();
 	type MaxHolds = ConstU32<0>;
 	type MaxFreezes = ConstU32<0>;
@@ -457,7 +456,6 @@ impl pallet_bridge_messages::Config<WithRialtoMessagesInstance> for Runtime {
 	type DeliveryPayments = ();
 
 	type TargetHeaderChain = crate::rialto_messages::RialtoAsTargetHeaderChain;
-	type LaneMessageVerifier = crate::rialto_messages::ToRialtoMessageVerifier;
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		Runtime,
 		WithRialtoMessagesInstance,
@@ -488,7 +486,6 @@ impl pallet_bridge_messages::Config<WithRialtoParachainMessagesInstance> for Run
 	type DeliveryPayments = ();
 
 	type TargetHeaderChain = crate::rialto_parachain_messages::RialtoParachainAsTargetHeaderChain;
-	type LaneMessageVerifier = crate::rialto_parachain_messages::ToRialtoParachainMessageVerifier;
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		Runtime,
 		WithRialtoParachainMessagesInstance,
@@ -599,7 +596,7 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 
 bp_runtime::generate_static_str_provider!(BridgeRefundRialtoPara2000Lane0Msgs);
 /// Signed extension that refunds relayers that are delivering messages from the Rialto parachain.
-pub type PriorityBoostPerMessage = ConstU64<324_316_715>;
+pub type PriorityBoostPerMessage = ConstU64<348_340_176>;
 pub type BridgeRefundRialtoParachainMessages = RefundBridgedParachainMessages<
 	Runtime,
 	RefundableParachain<WithRialtoParachainsInstance, bp_rialto_parachain::RialtoParachain>,
@@ -998,6 +995,10 @@ impl_runtime_apis! {
 				hex_literal::hex!("26aa394eea5630e07c48ae0c9558cef7b99d880ec681799c0cf30e8886371da946c154ffd9992e395af90b5b13cc6f295c77033fce8a9045824a6690bbf99c6db269502f0a8d1d2a008542d5690a0749").to_vec().into(),
 			];
 
+			use bp_messages::{
+				source_chain::FromBridgedChainMessagesDeliveryProof,
+				target_chain::FromBridgedChainMessagesProof,
+			};
 			use bridge_runtime_common::messages_benchmarking::{
 				prepare_message_delivery_proof_from_grandpa_chain,
 				prepare_message_delivery_proof_from_parachain,
@@ -1024,7 +1025,7 @@ impl_runtime_apis! {
 			impl MessagesConfig<WithRialtoParachainMessagesInstance> for Runtime {
 				fn prepare_message_proof(
 					params: MessageProofParams,
-				) -> (rialto_messages::FromRialtoMessagesProof, Weight) {
+				) -> (FromBridgedChainMessagesProof<bp_rialto_parachain::Hash>, Weight) {
 					prepare_message_proof_from_parachain::<
 						Runtime,
 						WithRialtoParachainsInstance,
@@ -1034,7 +1035,7 @@ impl_runtime_apis! {
 
 				fn prepare_message_delivery_proof(
 					params: MessageDeliveryProofParams<Self::AccountId>,
-				) -> rialto_messages::ToRialtoMessagesDeliveryProof {
+				) -> FromBridgedChainMessagesDeliveryProof<bp_rialto_parachain::Hash> {
 					prepare_message_delivery_proof_from_parachain::<
 						Runtime,
 						WithRialtoParachainsInstance,
@@ -1055,7 +1056,7 @@ impl_runtime_apis! {
 			impl MessagesConfig<WithRialtoMessagesInstance> for Runtime {
 				fn prepare_message_proof(
 					params: MessageProofParams,
-				) -> (rialto_messages::FromRialtoMessagesProof, Weight) {
+				) -> (FromBridgedChainMessagesProof<bp_rialto::Hash>, Weight) {
 					prepare_message_proof_from_grandpa_chain::<
 						Runtime,
 						RialtoGrandpaInstance,
@@ -1065,7 +1066,7 @@ impl_runtime_apis! {
 
 				fn prepare_message_delivery_proof(
 					params: MessageDeliveryProofParams<Self::AccountId>,
-				) -> rialto_messages::ToRialtoMessagesDeliveryProof {
+				) -> FromBridgedChainMessagesDeliveryProof<bp_rialto::Hash> {
 					prepare_message_delivery_proof_from_grandpa_chain::<
 						Runtime,
 						RialtoGrandpaInstance,
@@ -1141,6 +1142,12 @@ impl_runtime_apis! {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use bp_runtime::Chain;
+
+	#[test]
+	fn runtime_version() {
+		assert_eq!(VERSION.state_version, bp_millau::Millau::STATE_VERSION as u8);
+	}
 
 	#[test]
 	fn call_size() {

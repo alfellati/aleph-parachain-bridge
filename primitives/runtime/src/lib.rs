@@ -41,6 +41,7 @@ pub use storage_proof::{
 	ProofSize as StorageProofSize, RawStorageProof, StorageProofChecker,
 };
 pub use storage_types::BoundedStorageValue;
+pub use vec_db::{TrustedVecDb, UntrustedVecDb, VecDbError};
 
 #[cfg(feature = "std")]
 pub use storage_proof::craft_valid_storage_proof;
@@ -51,6 +52,7 @@ pub mod messages;
 mod chain;
 mod storage_proof;
 mod storage_types;
+mod vec_db;
 
 // Re-export macro to aviod include paste dependency everywhere
 pub use sp_runtime::paste;
@@ -302,9 +304,9 @@ pub trait StorageMapKeyProvider {
 	/// The same as `StorageMap::Hasher1`.
 	type Hasher: StorageHasher;
 	/// The same as `StorageMap::Key1`.
-	type Key: FullCodec;
+	type Key: FullCodec + Send + Sync;
 	/// The same as `StorageMap::Value`.
-	type Value: FullCodec;
+	type Value: 'static + FullCodec;
 
 	/// This is a copy of the
 	/// `frame_support::storage::generator::StorageMap::storage_map_final_key`.
@@ -324,13 +326,13 @@ pub trait StorageDoubleMapKeyProvider {
 	/// The same as `StorageDoubleMap::Hasher1`.
 	type Hasher1: StorageHasher;
 	/// The same as `StorageDoubleMap::Key1`.
-	type Key1: FullCodec;
+	type Key1: FullCodec + Send + Sync;
 	/// The same as `StorageDoubleMap::Hasher2`.
 	type Hasher2: StorageHasher;
 	/// The same as `StorageDoubleMap::Key2`.
-	type Key2: FullCodec;
+	type Key2: FullCodec + Send + Sync;
 	/// The same as `StorageDoubleMap::Value`.
-	type Value: FullCodec;
+	type Value: 'static + FullCodec;
 
 	/// This is a copy of the
 	/// `frame_support::storage::generator::StorageDoubleMap::storage_double_map_final_key`.

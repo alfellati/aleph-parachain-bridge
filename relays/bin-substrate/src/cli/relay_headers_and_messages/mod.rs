@@ -64,7 +64,7 @@ use crate::{
 		},
 		chain_schema::*,
 		relay_headers_and_messages::parachain_to_parachain::ParachainToParachainBridge,
-		CliChain, HexLaneId, PrometheusParams,
+		CliChain, DefaultClient, HexLaneId, PrometheusParams,
 	},
 	declare_chain_cli_schema,
 };
@@ -72,12 +72,12 @@ use bp_messages::LaneId;
 use bp_runtime::BalanceOf;
 use relay_substrate_client::{
 	AccountIdOf, AccountKeyPairOf, Chain, ChainWithBalances, ChainWithMessages,
-	ChainWithTransactions, Client, Parachain,
+	ChainWithTransactions, Parachain,
 };
 use relay_utils::metrics::MetricsParams;
 use sp_core::Pair;
 use substrate_relay_helper::{
-	messages_lane::MessagesRelayParams, on_demand::OnDemandRelay, TaggedAccount, TransactionParams,
+	messages::MessagesRelayParams, on_demand::OnDemandRelay, TaggedAccount, TransactionParams,
 };
 
 /// Parameters that have the same names across all bridges.
@@ -130,7 +130,7 @@ impl<Left: ChainWithTransactions + CliChain, Right: ChainWithTransactions + CliC
 /// Parameters that are associated with one side of the bridge.
 pub struct BridgeEndCommonParams<Chain: ChainWithTransactions + CliChain> {
 	/// Chain client.
-	pub client: Client<Chain>,
+	pub client: DefaultClient<Chain>,
 	/// Transactions signer.
 	pub sign: AccountKeyPairOf<Chain>,
 	/// Transactions mortality.
@@ -178,7 +178,7 @@ where
 		source_to_target_headers_relay: Arc<dyn OnDemandRelay<Source, Target>>,
 		target_to_source_headers_relay: Arc<dyn OnDemandRelay<Target, Source>>,
 		lane_id: LaneId,
-	) -> MessagesRelayParams<Bridge::MessagesLane> {
+	) -> MessagesRelayParams<Bridge::MessagesLane, DefaultClient<Source>, DefaultClient<Target>> {
 		MessagesRelayParams {
 			source_client: self.source.client.clone(),
 			source_transaction_params: TransactionParams {
@@ -353,14 +353,14 @@ where
 			.collect::<Vec<_>>();
 		{
 			let common = self.mut_base().mut_common();
-			substrate_relay_helper::messages_metrics::add_relay_balances_metrics::<_, Self::Right>(
+			substrate_relay_helper::messages::metrics::add_relay_balances_metrics::<_, Self::Right>(
 				common.left.client.clone(),
 				&mut common.metrics_params,
 				&common.left.accounts,
 				&lanes,
 			)
 			.await?;
-			substrate_relay_helper::messages_metrics::add_relay_balances_metrics::<_, Self::Left>(
+			substrate_relay_helper::messages::metrics::add_relay_balances_metrics::<_, Self::Left>(
 				common.right.client.clone(),
 				&mut common.metrics_params,
 				&common.right.accounts,
@@ -372,8 +372,10 @@ where
 		// Need 2x capacity since we consider both directions for each lane
 		let mut message_relays = Vec::with_capacity(lanes.len() * 2);
 		for lane in lanes {
-			let left_to_right_messages = substrate_relay_helper::messages_lane::run::<
+			let left_to_right_messages = substrate_relay_helper::messages::run::<
 				<Self::L2R as MessagesCliBridge>::MessagesLane,
+				_,
+				_,
 			>(self.left_to_right().messages_relay_params(
 				left_to_right_on_demand_headers.clone(),
 				right_to_left_on_demand_headers.clone(),
@@ -383,8 +385,10 @@ where
 			.boxed();
 			message_relays.push(left_to_right_messages);
 
-			let right_to_left_messages = substrate_relay_helper::messages_lane::run::<
+			let right_to_left_messages = substrate_relay_helper::messages::run::<
 				<Self::R2L as MessagesCliBridge>::MessagesLane,
+				_,
+				_,
 			>(self.right_to_left().messages_relay_params(
 				right_to_left_on_demand_headers.clone(),
 				left_to_right_on_demand_headers.clone(),

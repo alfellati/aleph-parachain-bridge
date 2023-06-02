@@ -27,7 +27,7 @@ use bp_runtime::{
 use frame_support::{
 	dispatch::DispatchClass,
 	sp_runtime::{MultiAddress, MultiSigner},
-	RuntimeDebug,
+	RuntimeDebug, StateVersion,
 };
 use sp_std::prelude::*;
 
@@ -46,6 +46,8 @@ impl Chain for BridgeHubRococo {
 	type Index = Index;
 	type Signature = Signature;
 
+	const STATE_VERSION: StateVersion = StateVersion::V1;
+
 	fn max_extrinsic_size() -> u32 {
 		*BlockLength::get().max.get(DispatchClass::Normal)
 	}
@@ -60,6 +62,16 @@ impl Chain for BridgeHubRococo {
 
 impl Parachain for BridgeHubRococo {
 	const PARACHAIN_ID: u32 = BRIDGE_HUB_ROCOCO_PARACHAIN_ID;
+}
+
+impl ChainWithMessages for BridgeHubRococo {
+	const WITH_CHAIN_MESSAGES_PALLET_NAME: &'static str =
+		WITH_BRIDGE_HUB_ROCOCO_MESSAGES_PALLET_NAME;
+
+	const MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX: MessageNonce =
+		MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
+	const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce =
+		MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
 }
 
 /// Public key of the chain account that may be used to verify signatures.

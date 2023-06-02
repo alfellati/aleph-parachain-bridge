@@ -17,19 +17,21 @@
 //! Tools for supporting message lanes between two Substrate-based chains.
 
 use crate::{
-	messages_source::{SubstrateMessagesProof, SubstrateMessagesSource},
-	messages_target::{SubstrateMessagesDeliveryProof, SubstrateMessagesTarget},
+	messages::{
+		source::{SubstrateMessagesProof, SubstrateMessagesSource},
+		target::{SubstrateMessagesDeliveryProof, SubstrateMessagesTarget},
+	},
 	on_demand::OnDemandRelay,
 	BatchCallBuilder, BatchCallBuilderConstructor, TransactionParams,
 };
 
 use async_std::sync::Arc;
-use bp_messages::{LaneId, MessageNonce};
+use bp_messages::{
+	source_chain::FromBridgedChainMessagesDeliveryProof,
+	target_chain::FromBridgedChainMessagesProof, ChainWithMessages as _, LaneId, MessageNonce,
+};
 use bp_runtime::{
 	AccountIdOf, Chain as _, EncodedOrDecodedCall, HeaderIdOf, TransactionEra, WeightExtraOps,
-};
-use bridge_runtime_common::messages::{
-	source::FromBridgedChainMessagesDeliveryProof, target::FromBridgedChainMessagesProof,
 };
 use codec::Encode;
 use frame_support::{dispatch::GetDispatchInfo, weights::Weight};
@@ -47,6 +49,10 @@ use relay_utils::{
 use sp_core::Pair;
 use sp_runtime::traits::Zero;
 use std::{convert::TryFrom, fmt::Debug, marker::PhantomData};
+
+pub mod metrics;
+pub mod source;
+pub mod target;
 
 /// Substrate -> Substrate messages synchronization pipeline.
 pub trait SubstrateMessageLane: 'static + Clone + Debug + Send + Sync {
@@ -88,13 +94,13 @@ impl<P: SubstrateMessageLane> MessageLane for MessageLaneAdapter<P> {
 }
 
 /// Substrate <-> Substrate messages relay parameters.
-pub struct MessagesRelayParams<P: SubstrateMessageLane> {
+pub struct MessagesRelayParams<P: SubstrateMessageLane, SourceClnt, TargetClnt> {
 	/// Messages source client.
-	pub source_client: Client<P::SourceChain>,
+	pub source_client: SourceClnt,
 	/// Source transaction params.
 	pub source_transaction_params: TransactionParams<AccountKeyPairOf<P::SourceChain>>,
 	/// Messages target client.
-	pub target_client: Client<P::TargetChain>,
+	pub target_client: TargetClnt,
 	/// Target transaction params.
 	pub target_transaction_params: TransactionParams<AccountKeyPairOf<P::TargetChain>>,
 	/// Optional on-demand source to target headers relay.
@@ -168,8 +174,13 @@ impl<SC: Chain, TC: Chain, B: BatchCallBuilderConstructor<CallOf<SC>>>
 }
 
 /// Run Substrate-to-Substrate messages sync loop.
-pub async fn run<P: SubstrateMessageLane>(params: MessagesRelayParams<P>) -> anyhow::Result<()>
+pub async fn run<P, SourceClnt, TargetClnt>(
+	params: MessagesRelayParams<P, SourceClnt, TargetClnt>,
+) -> anyhow::Result<()>
 where
+	P: SubstrateMessageLane,
+	SourceClnt: Client<P::SourceChain>,
+	TargetClnt: Client<P::TargetChain>,
 	AccountIdOf<P::SourceChain>: From<<AccountKeyPairOf<P::SourceChain> as Pair>::Public>,
 	AccountIdOf<P::TargetChain>: From<<AccountKeyPairOf<P::TargetChain> as Pair>::Public>,
 	BalanceOf<P::SourceChain>: TryFrom<BalanceOf<P::TargetChain>>,
@@ -179,7 +190,7 @@ where
 	// we don't know exact weights of the Polkadot runtime. So to guess weights we'll be using
 	// weights from Rialto and then simply dividing it by x2.
 	let (max_messages_in_single_batch, max_messages_weight_in_single_batch) =
-		select_delivery_transaction_limits_rpc::<P>(
+		select_delivery_transaction_limits_rpc(
 			&params,
 			P::TargetChain::max_extrinsic_weight(),
 			P::SourceChain::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
@@ -238,14 +249,14 @@ where
 				max_messages_size_in_single_batch,
 			},
 		},
-		SubstrateMessagesSource::<P>::new(
+		SubstrateMessagesSource::<P, _, _>::new(
 			source_client.clone(),
 			target_client.clone(),
 			params.lane_id,
 			params.source_transaction_params,
 			params.target_to_source_headers_relay,
 		),
-		SubstrateMessagesTarget::<P>::new(
+		SubstrateMessagesTarget::<P, _, _>::new(
 			target_client,
 			source_client,
 			params.lane_id,
@@ -334,21 +345,21 @@ macro_rules! generate_receive_message_proof_call_builder {
 	($pipeline:ident, $mocked_builder:ident, $bridge_messages:path, $receive_messages_proof:path) => {
 		pub struct $mocked_builder;
 
-		impl $crate::messages_lane::ReceiveMessagesProofCallBuilder<$pipeline>
+		impl $crate::messages::ReceiveMessagesProofCallBuilder<$pipeline>
 			for $mocked_builder
 		{
 			fn build_receive_messages_proof_call(
 				relayer_id_at_source: relay_substrate_client::AccountIdOf<
-					<$pipeline as $crate::messages_lane::SubstrateMessageLane>::SourceChain
+					<$pipeline as $crate::messages::SubstrateMessageLane>::SourceChain
 				>,
-				proof: $crate::messages_source::SubstrateMessagesProof<
-					<$pipeline as $crate::messages_lane::SubstrateMessageLane>::SourceChain
+				proof: $crate::messages::source::SubstrateMessagesProof<
+					<$pipeline as $crate::messages::SubstrateMessageLane>::SourceChain
 				>,
 				messages_count: u32,
 				dispatch_weight: bp_messages::Weight,
 				_trace_call: bool,
 			) -> relay_substrate_client::CallOf<
-				<$pipeline as $crate::messages_lane::SubstrateMessageLane>::TargetChain
+				<$pipeline as $crate::messages::SubstrateMessageLane>::TargetChain
 			> {
 				bp_runtime::paste::item! {
 					$bridge_messages($receive_messages_proof {
@@ -430,16 +441,16 @@ macro_rules! generate_receive_message_delivery_proof_call_builder {
 	($pipeline:ident, $mocked_builder:ident, $bridge_messages:path, $receive_messages_delivery_proof:path) => {
 		pub struct $mocked_builder;
 
-		impl $crate::messages_lane::ReceiveMessagesDeliveryProofCallBuilder<$pipeline>
+		impl $crate::messages::ReceiveMessagesDeliveryProofCallBuilder<$pipeline>
 			for $mocked_builder
 		{
 			fn build_receive_messages_delivery_proof_call(
-				proof: $crate::messages_target::SubstrateMessagesDeliveryProof<
-					<$pipeline as $crate::messages_lane::SubstrateMessageLane>::TargetChain
+				proof: $crate::messages::target::SubstrateMessagesDeliveryProof<
+					<$pipeline as $crate::messages::SubstrateMessageLane>::TargetChain
 				>,
 				_trace_call: bool,
 			) -> relay_substrate_client::CallOf<
-				<$pipeline as $crate::messages_lane::SubstrateMessageLane>::SourceChain
+				<$pipeline as $crate::messages::SubstrateMessageLane>::SourceChain
 			> {
 				bp_runtime::paste::item! {
 					$bridge_messages($receive_messages_delivery_proof {
@@ -453,12 +464,15 @@ macro_rules! generate_receive_message_delivery_proof_call_builder {
 }
 
 /// Returns maximal number of messages and their maximal cumulative dispatch weight.
-async fn select_delivery_transaction_limits_rpc<P: SubstrateMessageLane>(
-	params: &MessagesRelayParams<P>,
+async fn select_delivery_transaction_limits_rpc<P, SourceClnt, TargetClnt>(
+	params: &MessagesRelayParams<P, SourceClnt, TargetClnt>,
 	max_extrinsic_weight: Weight,
 	max_unconfirmed_messages_at_inbound_lane: MessageNonce,
 ) -> anyhow::Result<(MessageNonce, Weight)>
 where
+	P: SubstrateMessageLane,
+	SourceClnt: Client<P::SourceChain>,
+	TargetClnt: Client<P::TargetChain>,
 	AccountIdOf<P::SourceChain>: From<<AccountKeyPairOf<P::SourceChain> as Pair>::Public>,
 {
 	// We may try to guess accurate value, based on maximal number of messages and per-message
@@ -474,20 +488,21 @@ where
 	let weight_for_messages_dispatch = max_extrinsic_weight - weight_for_delivery_tx;
 
 	// weight of empty message delivery with outbound lane state
-	let delivery_tx_with_zero_messages = dummy_messages_delivery_transaction::<P>(params, 0)?;
+	let best_target_block_hash = params.target_client.best_header_hash().await?;
+	let delivery_tx_with_zero_messages = dummy_messages_delivery_transaction::<P, _, _>(params, 0)?;
 	let delivery_tx_with_zero_messages_weight = params
 		.target_client
-		.extimate_extrinsic_weight(delivery_tx_with_zero_messages)
+		.estimate_extrinsic_weight(best_target_block_hash, delivery_tx_with_zero_messages)
 		.await
 		.map_err(|e| {
 			anyhow::format_err!("Failed to estimate delivery extrinsic weight: {:?}", e)
 		})?;
 
 	// weight of single message delivery with outbound lane state
-	let delivery_tx_with_one_message = dummy_messages_delivery_transaction::<P>(params, 1)?;
+	let delivery_tx_with_one_message = dummy_messages_delivery_transaction::<P, _, _>(params, 1)?;
 	let delivery_tx_with_one_message_weight = params
 		.target_client
-		.extimate_extrinsic_weight(delivery_tx_with_one_message)
+		.estimate_extrinsic_weight(best_target_block_hash, delivery_tx_with_one_message)
 		.await
 		.map_err(|e| {
 			anyhow::format_err!("Failed to estimate delivery extrinsic weight: {:?}", e)
@@ -519,8 +534,8 @@ where
 }
 
 /// Returns dummy message delivery transaction with zero messages and `1kb` proof.
-fn dummy_messages_delivery_transaction<P: SubstrateMessageLane>(
-	params: &MessagesRelayParams<P>,
+fn dummy_messages_delivery_transaction<P: SubstrateMessageLane, SourceClnt, TargetClnt>(
+	params: &MessagesRelayParams<P, SourceClnt, TargetClnt>,
 	messages: u32,
 ) -> anyhow::Result<<P::TargetChain as ChainWithTransactions>::SignedTransaction>
 where
@@ -538,13 +553,7 @@ where
 				Weight::zero(),
 				FromBridgedChainMessagesProof {
 					bridged_header_hash: Default::default(),
-					// we may use per-chain `EXTRA_STORAGE_PROOF_SIZE`, but since we don't need
-					// exact values, this global estimation is fine
-					storage_proof: vec![vec![
-						42u8;
-						pallet_bridge_messages::EXTRA_STORAGE_PROOF_SIZE
-							as usize
-					]],
+					storage: Default::default(),
 					lane: Default::default(),
 					nonces_start: 1,
 					nonces_end: messages as u64,
