@@ -858,7 +858,7 @@ dependencies = [
  "sp-application-crypto",
  "sp-core",
  "sp-runtime",
- "sp-std 5.0.0",
+ "sp-std 8.0.0",
 ]
 
 [[package]]
@@ -6681,7 +6681,7 @@ dependencies = [
  "sp-core",
  "sp-io",
  "sp-runtime",
- "sp-std 5.0.0",
+ "sp-std 8.0.0",
  "sp-trie",
 ]
 
