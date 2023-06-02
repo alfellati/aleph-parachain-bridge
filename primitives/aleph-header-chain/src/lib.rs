@@ -62,7 +62,6 @@ pub enum BridgeAlephCall<Header: HeaderT> {
 	initialize { init_data: InitializationData<Header> },
 }
 
-/// The `BridgeAlephCall` used by a chain.
 pub type BridgeAlephCallOf<C> = BridgeAlephCall<HeaderOf<C>>;
 
 pub trait ChainWithAleph: Chain {
