@@ -148,7 +148,7 @@ pub mod pallet {
 	pub type BestFinalized<T: Config<I>, I: 'static = ()> =
 		StorageValue<_, BridgedBlockId<T, I>, OptionQuery>;
 
-	/// A ring buffer of imported hashes. Ordered by the insertion time.
+	/// A ring buffer of imported hashes. Ordered by insertion time.
 	#[pallet::storage]
 	pub(super) type ImportedHashes<T: Config<I>, I: 'static = ()> = StorageMap<
 		Hasher = Identity,
