@@ -43,22 +43,14 @@ use storage_types::StoredAuthoritySet;
 // Re-export in crate namespace for `construct_runtime!`
 pub use pallet::*;
 
-/// The target that will be used when publishing logs related to this pallet.
 pub const LOG_TARGET: &str = "runtime::bridge-aleph";
 
-/// Bridged chain from the pallet configuration.
 pub type BridgedChain<T, I> = <T as Config<I>>::BridgedChain;
-/// Block number of the bridged chain.
 pub type BridgedBlockNumber<T, I> = BlockNumberOf<<T as Config<I>>::BridgedChain>;
-/// Block hash of the bridged chain.
 pub type BridgedBlockHash<T, I> = HashOf<<T as Config<I>>::BridgedChain>;
-/// Block id of the bridged chain.
 pub type BridgedBlockId<T, I> = HeaderId<BridgedBlockHash<T, I>, BridgedBlockNumber<T, I>>;
-/// Hasher of the bridged chain.
 pub type BridgedBlockHasher<T, I> = HasherOf<<T as Config<I>>::BridgedChain>;
-/// Header of the bridged chain.
 pub type BridgedHeader<T, I> = HeaderOf<<T as Config<I>>::BridgedChain>;
-/// Header data of the bridged chain that is stored at this chain by this pallet.
 pub type BridgedStoredHeaderData<T, I> =
 	StoredHeaderData<BridgedBlockNumber<T, I>, BridgedBlockHash<T, I>>;
 
@@ -256,7 +248,7 @@ pub mod pallet {
 	///
 	/// Note this function solely takes care of updating the storage and pruning old entries,
 	/// but does not verify the validity of such import.
-	pub(crate) fn insert_header<T: Config<I>, I: 'static>(
+	fn insert_header<T: Config<I>, I: 'static>(
 		header: BridgedHeader<T, I>,
 		hash: BridgedBlockHash<T, I>,
 	) {
@@ -276,7 +268,7 @@ pub mod pallet {
 
 	/// Since this writes to storage with no real checks this should only be used in functions that
 	/// were called by a trusted origin.
-	pub(crate) fn initialize_bridge<T: Config<I>, I: 'static>(
+	fn initialize_bridge<T: Config<I>, I: 'static>(
 		init_params: super::InitializationData<BridgedHeader<T, I>>,
 	) -> Result<(), Error<T, I>> {
 		let super::InitializationData { header, authority_list, operating_mode } =
