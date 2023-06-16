@@ -24,16 +24,12 @@
 #![cfg(test)]
 
 use crate::messages::{
-	source::{
-		FromThisChainMaximalOutboundPayloadSize, FromThisChainMessagePayload,
-		TargetHeaderChainAdapter,
-	},
-	target::SourceHeaderChainAdapter,
-	BridgedChainWithMessages, HashOf, MessageBridge, ThisChainWithMessages,
+	source::FromThisChainMessagePayload, BridgedChainWithMessages, HashOf, MessageBridge,
+	ThisChainWithMessages,
 };
 
 use bp_header_chain::{ChainWithGrandpa, HeaderChain};
-use bp_messages::{target_chain::ForbidInboundMessages, LaneId, MessageNonce};
+use bp_messages::{target_chain::ForbidInboundMessages, ChainWithMessages, LaneId, MessageNonce};
 use bp_parachains::SingleParaStoredHeaderDataBuilder;
 use bp_relayers::PayRewardFromAccount;
 use bp_runtime::{Chain, ChainId, Parachain, UnderlyingChainProvider};
@@ -103,8 +99,6 @@ pub type TestStakeAndSlash = pallet_bridge_relayers::StakeAndSlashNamed<
 pub const TEST_LANE_ID: LaneId = LaneId([0, 0, 0, 0]);
 /// Bridged chain id used in tests.
 pub const TEST_BRIDGED_CHAIN_ID: ChainId = *b"brdg";
-/// Maximal extrinsic weight at the `BridgedChain`.
-pub const BRIDGED_CHAIN_MAX_EXTRINSIC_WEIGHT: usize = 2048;
 /// Maximal extrinsic size at the `BridgedChain`.
 pub const BRIDGED_CHAIN_MAX_EXTRINSIC_SIZE: u32 = 1024;
 
@@ -132,7 +126,6 @@ crate::generate_bridge_reject_obsolete_headers_and_messages! {
 
 parameter_types! {
 	pub const ActiveOutboundLanes: &'static [LaneId] = &[TEST_LANE_ID];
-	pub const BridgedChainId: ChainId = TEST_BRIDGED_CHAIN_ID;
 	pub const BridgedParasPalletName: &'static str = "Paras";
 	pub const ExistentialDeposit: ThisChainBalance = 500;
 	pub const DbWeight: RuntimeDbWeight = RuntimeDbWeight { read: 1, write: 2 };
@@ -142,8 +135,6 @@ parameter_types! {
 	pub AdjustmentVariable: Multiplier = Multiplier::saturating_from_rational(3, 100_000);
 	pub MinimumMultiplier: Multiplier = Multiplier::saturating_from_rational(1, 1_000_000u128);
 	pub MaximumMultiplier: Multiplier = sp_runtime::traits::Bounded::max_value();
-	pub const MaxUnrewardedRelayerEntriesAtInboundLane: MessageNonce = 16;
-	pub const MaxUnconfirmedMessagesAtInboundLane: MessageNonce = 1_000;
 	pub const ReserveId: [u8; 8] = *b"brdgrlrs";
 }
 
@@ -235,26 +226,23 @@ impl pallet_bridge_messages::Config for TestRuntime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_bridge_messages::weights::BridgeWeight<TestRuntime>;
 	type ActiveOutboundLanes = ActiveOutboundLanes;
-	type MaxUnrewardedRelayerEntriesAtInboundLane = MaxUnrewardedRelayerEntriesAtInboundLane;
-	type MaxUnconfirmedMessagesAtInboundLane = MaxUnconfirmedMessagesAtInboundLane;
 
-	type MaximalOutboundPayloadSize = FromThisChainMaximalOutboundPayloadSize<OnThisChainBridge>;
 	type OutboundPayload = FromThisChainMessagePayload;
 
 	type InboundPayload = Vec<u8>;
 	type InboundRelayer = BridgedChainAccountId;
 	type DeliveryPayments = ();
 
-	type TargetHeaderChain = TargetHeaderChainAdapter<OnThisChainBridge>;
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		TestRuntime,
 		(),
 		ConstU64<100_000>,
 	>;
 
-	type SourceHeaderChain = SourceHeaderChainAdapter<OnThisChainBridge>;
 	type MessageDispatch = ForbidInboundMessages<(), Vec<u8>>;
-	type BridgedChainId = BridgedChainId;
+	type ThisChain = ThisUnderlyingChain;
+	type BridgedChain = BridgedUnderlyingChain;
+	type BridgedHeaderChain = BridgeGrandpa;
 }
 
 impl pallet_bridge_relayers::Config for TestRuntime {
@@ -318,6 +306,8 @@ impl From<BridgedChainOrigin>
 pub struct ThisUnderlyingChain;
 
 impl Chain for ThisUnderlyingChain {
+	const ID: ChainId = *b"tuch";
+
 	type BlockNumber = ThisChainBlockNumber;
 	type Hash = ThisChainHash;
 	type Hasher = ThisChainHasher;
@@ -349,6 +339,13 @@ impl ThisChainWithMessages for ThisChain {
 	type RuntimeOrigin = ThisChainCallOrigin;
 }
 
+impl ChainWithMessages for ThisUnderlyingChain {
+	const WITH_CHAIN_MESSAGES_PALLET_NAME: &'static str = "";
+
+	const MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX: MessageNonce = 16;
+	const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce = 1000;
+}
+
 impl BridgedChainWithMessages for ThisChain {}
 
 /// Underlying chain of `BridgedChain`.
@@ -360,6 +357,8 @@ pub struct BridgedUnderlyingParachain;
 pub struct BridgedChainCall;
 
 impl Chain for BridgedUnderlyingChain {
+	const ID: ChainId = TEST_BRIDGED_CHAIN_ID;
+
 	type BlockNumber = BridgedChainBlockNumber;
 	type Hash = BridgedChainHash;
 	type Hasher = BridgedChainHasher;
@@ -387,7 +386,15 @@ impl ChainWithGrandpa for BridgedUnderlyingChain {
 	const AVERAGE_HEADER_SIZE_IN_JUSTIFICATION: u32 = 64;
 }
 
+impl ChainWithMessages for BridgedUnderlyingChain {
+	const WITH_CHAIN_MESSAGES_PALLET_NAME: &'static str = "";
+	const MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX: MessageNonce = 16;
+	const MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX: MessageNonce = 1000;
+}
+
 impl Chain for BridgedUnderlyingParachain {
+	const ID: ChainId = *b"bupc";
+
 	type BlockNumber = BridgedChainBlockNumber;
 	type Hash = BridgedChainHash;
 	type Hasher = BridgedChainHasher;

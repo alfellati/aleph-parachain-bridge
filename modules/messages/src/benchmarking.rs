@@ -20,15 +20,16 @@
 
 use crate::{
 	inbound_lane::InboundLaneStorage, outbound_lane, weights_ext::EXPECTED_DEFAULT_MESSAGE_LENGTH,
-	Call, OutboundLanes, RuntimeInboundLaneStorage,
+	BridgedChainOf, Call, OutboundLanes, RuntimeInboundLaneStorage,
 };
 
 use bp_messages::{
-	source_chain::TargetHeaderChain, target_chain::SourceHeaderChain, DeliveredMessages,
+	source_chain::FromBridgedChainMessagesDeliveryProof,
+	target_chain::FromBridgedChainMessagesProof, ChainWithMessages, DeliveredMessages,
 	InboundLaneData, LaneId, MessageNonce, OutboundLaneData, UnrewardedRelayer,
 	UnrewardedRelayersState,
 };
-use bp_runtime::StorageProofSize;
+use bp_runtime::{HashOf, StorageProofSize};
 use codec::Decode;
 use frame_benchmarking::{account, v2::*};
 use frame_support::weights::Weight;
@@ -96,11 +97,11 @@ pub trait Config<I: 'static>: crate::Config<I> {
 	/// Prepare messages proof to receive by the module.
 	fn prepare_message_proof(
 		params: MessageProofParams,
-	) -> (<Self::SourceHeaderChain as SourceHeaderChain>::MessagesProof, Weight);
+	) -> (FromBridgedChainMessagesProof<HashOf<BridgedChainOf<Self, I>>>, Weight);
 	/// Prepare messages delivery proof to receive by the module.
 	fn prepare_message_delivery_proof(
 		params: MessageDeliveryProofParams<Self::AccountId>,
-	) -> <Self::TargetHeaderChain as TargetHeaderChain<Self::OutboundPayload, Self::AccountId>>::MessagesDeliveryProof;
+	) -> FromBridgedChainMessagesDeliveryProof<HashOf<BridgedChainOf<Self, I>>>;
 
 	/// Returns true if message has been successfully dispatched or not.
 	fn is_message_successfully_dispatched(_nonce: MessageNonce) -> bool {
@@ -186,14 +187,17 @@ mod benchmarks {
 	// Benchmarks that are used directly by the runtime calls weight formulae.
 	//
 
+	fn max_msgs<T: Config<I>, I: 'static>() -> u32 {
+		T::BridgedChain::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX as u32 -
+			ReceiveMessagesProofSetup::<T, I>::LATEST_RECEIVED_NONCE as u32
+	}
+
 	// Benchmark `receive_messages_proof` extrinsic with single minimal-weight message and following
 	// conditions:
 	// * proof does not include outbound lane state proof;
 	// * inbound lane already has state, so it needs to be read and decoded;
 	// * message is dispatched (reminder: dispatch weight should be minimal);
 	// * message requires all heavy checks done by dispatcher.
-	//
-	// This is base benchmark for all other message delivery benchmarks.
 	#[benchmark]
 	fn receive_single_message_proof() {
 		// setup code
@@ -219,21 +223,16 @@ mod benchmarks {
 		setup.check_last_nonce();
 	}
 
-	// Benchmark `receive_messages_proof` extrinsic with two minimal-weight messages and following
+	// Benchmark `receive_messages_proof` extrinsic with `n` minimal-weight messages and following
 	// conditions:
 	// * proof does not include outbound lane state proof;
 	// * inbound lane already has state, so it needs to be read and decoded;
 	// * message is dispatched (reminder: dispatch weight should be minimal);
 	// * message requires all heavy checks done by dispatcher.
-	//
-	// The weight of single message delivery could be approximated as
-	// `weight(receive_two_messages_proof) - weight(receive_single_message_proof)`.
-	// This won't be super-accurate if message has non-zero dispatch weight, but estimation should
-	// be close enough to real weight.
 	#[benchmark]
-	fn receive_two_messages_proof() {
+	fn receive_n_messages_proof(n: Linear<1, { max_msgs::<T, I>() }>) {
 		// setup code
-		let setup = ReceiveMessagesProofSetup::<T, I>::new(2);
+		let setup = ReceiveMessagesProofSetup::<T, I>::new(n);
 		let (proof, dispatch_weight) = T::prepare_message_proof(MessageProofParams {
 			lane: T::bench_lane_id(),
 			message_nonces: setup.nonces(),
@@ -489,6 +488,7 @@ mod benchmarks {
 	// * inbound lane already has state, so it needs to be read and decoded;
 	// * message is **SUCCESSFULLY** dispatched;
 	// * message requires all heavy checks done by dispatcher.
+	// #[benchmark(extra)]
 	#[benchmark]
 	fn receive_single_message_n_bytes_proof_with_dispatch(
 		/// Proof size in bytes
@@ -518,5 +518,9 @@ mod benchmarks {
 		assert!(T::is_message_successfully_dispatched(setup.last_nonce()));
 	}
 
-	impl_benchmark_test_suite!(Pallet, crate::mock::new_test_ext(), crate::mock::TestRuntime);
+	impl_benchmark_test_suite!(
+		Pallet,
+		crate::tests::mock::new_test_ext(),
+		crate::tests::mock::TestRuntime
+	);
 }

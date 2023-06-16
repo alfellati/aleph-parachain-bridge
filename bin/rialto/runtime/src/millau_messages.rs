@@ -20,9 +20,7 @@ use crate::{MillauGrandpaInstance, Runtime, RuntimeOrigin, WithMillauMessagesIns
 
 use bp_messages::LaneId;
 use bridge_runtime_common::{
-	messages::{
-		self, source::TargetHeaderChainAdapter, target::SourceHeaderChainAdapter, MessageBridge,
-	},
+	messages::{self, MessageBridge},
 	messages_xcm_extension::{XcmBlobHauler, XcmBlobHaulerAdapter},
 };
 use frame_support::{parameter_types, weights::Weight, RuntimeDebug};
@@ -56,10 +54,6 @@ pub type FromMillauMessageDispatch =
 		(),
 	>;
 
-/// Maximal outbound payload size of Rialto -> Millau messages.
-pub type ToMillauMaximalOutboundPayloadSize =
-	messages::source::FromThisChainMaximalOutboundPayloadSize<WithMillauMessageBridge>;
-
 /// Millau <-> Rialto message bridge.
 #[derive(RuntimeDebug, Clone, Copy)]
 pub struct WithMillauMessageBridge;
@@ -88,10 +82,6 @@ impl messages::ThisChainWithMessages for Rialto {
 /// Millau chain from message lane point of view.
 #[derive(RuntimeDebug, Clone, Copy)]
 pub struct Millau;
-/// Millau as source header chain.
-pub type MillauAsSourceHeaderChain = SourceHeaderChainAdapter<WithMillauMessageBridge>;
-/// Millau as target header chain.
-pub type MillauAsTargetHeaderChain = TargetHeaderChainAdapter<WithMillauMessageBridge>;
 
 impl messages::UnderlyingChainProvider for Millau {
 	type Chain = bp_millau::Millau;
@@ -121,6 +111,7 @@ impl XcmBlobHauler for ToMillauXcmBlobHauler {
 mod tests {
 	use super::*;
 	use crate::{MillauGrandpaInstance, Runtime, WithMillauMessagesInstance};
+	use bp_runtime::Chain;
 	use bridge_runtime_common::{
 		assert_complete_bridge_types,
 		integrity::{
@@ -166,7 +157,7 @@ mod tests {
 					bp_millau::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
 				max_unconfirmed_messages_in_bridged_confirmation_tx:
 					bp_millau::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
-				bridged_chain_id: bp_runtime::MILLAU_CHAIN_ID,
+				bridged_chain_id: bp_millau::Millau::ID,
 			},
 			pallet_names: AssertBridgePalletNames {
 				with_this_chain_messages_pallet_name: bp_rialto::WITH_RIALTO_MESSAGES_PALLET_NAME,

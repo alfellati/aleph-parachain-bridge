@@ -20,9 +20,7 @@ use crate::{RialtoGrandpaInstance, Runtime, RuntimeOrigin, WithRialtoMessagesIns
 
 use bp_messages::LaneId;
 use bridge_runtime_common::{
-	messages::{
-		self, source::TargetHeaderChainAdapter, target::SourceHeaderChainAdapter, MessageBridge,
-	},
+	messages::{self, MessageBridge},
 	messages_xcm_extension::{XcmBlobHauler, XcmBlobHaulerAdapter},
 };
 use frame_support::{parameter_types, weights::Weight, RuntimeDebug};
@@ -57,10 +55,6 @@ pub type FromRialtoMessageDispatch =
 		(),
 	>;
 
-/// Maximal outbound payload size of Millau -> Rialto messages.
-pub type ToRialtoMaximalOutboundPayloadSize =
-	messages::source::FromThisChainMaximalOutboundPayloadSize<WithRialtoMessageBridge>;
-
 /// Millau <-> Rialto message bridge.
 #[derive(RuntimeDebug, Clone, Copy)]
 pub struct WithRialtoMessageBridge;
@@ -89,10 +83,6 @@ impl messages::ThisChainWithMessages for Millau {
 /// Rialto chain from message lane point of view.
 #[derive(RuntimeDebug, Clone, Copy)]
 pub struct Rialto;
-/// Rialto as source header chain.
-pub type RialtoAsSourceHeaderChain = SourceHeaderChainAdapter<WithRialtoMessageBridge>;
-/// Rialto as target header chain.
-pub type RialtoAsTargetHeaderChain = TargetHeaderChainAdapter<WithRialtoMessageBridge>;
 
 impl messages::UnderlyingChainProvider for Rialto {
 	type Chain = bp_rialto::Rialto;
@@ -137,6 +127,7 @@ mod tests {
 	use super::*;
 	use crate::{Runtime, WithRialtoMessagesInstance};
 
+	use bp_runtime::Chain;
 	use bridge_runtime_common::{
 		assert_complete_bridge_types,
 		integrity::{
@@ -182,7 +173,7 @@ mod tests {
 					bp_rialto::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
 				max_unconfirmed_messages_in_bridged_confirmation_tx:
 					bp_rialto::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
-				bridged_chain_id: bp_runtime::RIALTO_CHAIN_ID,
+				bridged_chain_id: bp_rialto::Rialto::ID,
 			},
 			pallet_names: AssertBridgePalletNames {
 				with_this_chain_messages_pallet_name: bp_millau::WITH_MILLAU_MESSAGES_PALLET_NAME,

@@ -8,7 +8,7 @@ license = "GPL-3.0-or-later WITH Classpath-exception-2.0"
 [dependencies]
 codec = { package = "parity-scale-codec", version = "3.1.5", features = ["derive"] }
 scale-info = { version = "2.6.0", default-features = false, features = ["derive"] }
-subxt = { version = "0.28.0", default-features = false, features = [] }
+subxt = { version = "0.29.0", default-features = false, features = [] }
 
 # Bridge dependencies
 
@@ -18,7 +18,6 @@ bp-header-chain = { path = "../../primitives/header-chain" }
 bp-parachains = { path = "../../primitives/parachains" }
 bp-polkadot-core = { path = "../../primitives/polkadot-core" }
 bp-rococo = { path = "../../primitives/chain-rococo" }
-bp-runtime = { path = "../../primitives/runtime" }
 
 bridge-runtime-common = { path = "../../bin/runtime-common" }
 relay-bridge-hub-rococo-client = { path = "../client-bridge-hub-rococo" }

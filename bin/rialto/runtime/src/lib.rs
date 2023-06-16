@@ -407,12 +407,7 @@ impl pallet_shift_session_manager::Config for Runtime {}
 
 parameter_types! {
 	pub const MaxMessagesToPruneAtOnce: bp_messages::MessageNonce = 8;
-	pub const MaxUnrewardedRelayerEntriesAtInboundLane: bp_messages::MessageNonce =
-		bp_millau::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX;
-	pub const MaxUnconfirmedMessagesAtInboundLane: bp_messages::MessageNonce =
-		bp_millau::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
 	pub const RootAccountForPayments: Option<AccountId> = None;
-	pub const BridgedChainId: bp_runtime::ChainId = bp_runtime::MILLAU_CHAIN_ID;
 	pub ActiveOutboundLanes: &'static [bp_messages::LaneId] = &[millau_messages::XCM_LANE];
 }
 
@@ -422,27 +417,26 @@ pub type WithMillauMessagesInstance = ();
 impl pallet_bridge_messages::Config<WithMillauMessagesInstance> for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_bridge_messages::weights::BridgeWeight<Runtime>;
-	type ActiveOutboundLanes = ActiveOutboundLanes;
-	type MaxUnrewardedRelayerEntriesAtInboundLane = MaxUnrewardedRelayerEntriesAtInboundLane;
-	type MaxUnconfirmedMessagesAtInboundLane = MaxUnconfirmedMessagesAtInboundLane;
 
-	type MaximalOutboundPayloadSize = crate::millau_messages::ToMillauMaximalOutboundPayloadSize;
+	type ThisChain = bp_rialto::Rialto;
+	type BridgedChain = bp_millau::Millau;
+	type BridgedHeaderChain = BridgeMillauGrandpa;
+
+	type ActiveOutboundLanes = ActiveOutboundLanes;
+
 	type OutboundPayload = crate::millau_messages::ToMillauMessagePayload;
 
 	type InboundPayload = crate::millau_messages::FromMillauMessagePayload;
 	type InboundRelayer = bp_millau::AccountId;
 	type DeliveryPayments = ();
 
-	type TargetHeaderChain = crate::millau_messages::MillauAsTargetHeaderChain;
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		Runtime,
 		WithMillauMessagesInstance,
 		frame_support::traits::ConstU128<100_000>,
 	>;
 
-	type SourceHeaderChain = crate::millau_messages::MillauAsSourceHeaderChain;
 	type MessageDispatch = crate::millau_messages::FromMillauMessageDispatch;
-	type BridgedChainId = BridgedChainId;
 }
 
 pub type MillauBeefyInstance = ();

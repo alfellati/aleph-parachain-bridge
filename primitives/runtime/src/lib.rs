@@ -37,7 +37,7 @@ pub use chain::{
 pub use frame_support::storage::storage_prefix as storage_value_final_key;
 use num_traits::{CheckedAdd, CheckedSub, One, SaturatingAdd, Zero};
 pub use storage_proof::{
-	record_all_keys as record_all_trie_keys, Error as StorageProofError,
+	grow_trie_leaf_value, record_all_keys as record_all_trie_keys, Error as StorageProofError,
 	ProofSize as StorageProofSize, RawStorageProof, StorageProofChecker,
 };
 pub use storage_types::BoundedStorageValue;
@@ -59,45 +59,6 @@ pub use sp_runtime::paste;
 
 /// Use this when something must be shared among all instances.
 pub const NO_INSTANCE_ID: ChainId = [0, 0, 0, 0];
-
-/// Rialto chain id.
-pub const RIALTO_CHAIN_ID: ChainId = *b"rlto";
-
-/// RialtoParachain chain id.
-pub const RIALTO_PARACHAIN_CHAIN_ID: ChainId = *b"rlpa";
-
-/// Millau chain id.
-pub const MILLAU_CHAIN_ID: ChainId = *b"mlau";
-
-/// Polkadot chain id.
-pub const POLKADOT_CHAIN_ID: ChainId = *b"pdot";
-
-/// Kusama chain id.
-pub const KUSAMA_CHAIN_ID: ChainId = *b"ksma";
-
-/// Westend chain id.
-pub const WESTEND_CHAIN_ID: ChainId = *b"wend";
-
-/// Westend chain id.
-pub const WESTMINT_CHAIN_ID: ChainId = *b"wmnt";
-
-/// Rococo chain id.
-pub const ROCOCO_CHAIN_ID: ChainId = *b"roco";
-
-/// Wococo chain id.
-pub const WOCOCO_CHAIN_ID: ChainId = *b"woco";
-
-/// BridgeHubRococo chain id.
-pub const BRIDGE_HUB_ROCOCO_CHAIN_ID: ChainId = *b"bhro";
-
-/// BridgeHubWococo chain id.
-pub const BRIDGE_HUB_WOCOCO_CHAIN_ID: ChainId = *b"bhwo";
-
-/// BridgeHubKusama chain id.
-pub const BRIDGE_HUB_KUSAMA_CHAIN_ID: ChainId = *b"bhks";
-
-/// BridgeHubPolkadot chain id.
-pub const BRIDGE_HUB_POLKADOT_CHAIN_ID: ChainId = *b"bhpd";
 
 /// Generic header Id.
 #[derive(

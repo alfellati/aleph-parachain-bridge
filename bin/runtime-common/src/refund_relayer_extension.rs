@@ -22,9 +22,9 @@
 use crate::messages_call_ext::{
 	CallHelper as MessagesCallHelper, CallInfo as MessagesCallInfo, MessagesCallSubType,
 };
-use bp_messages::{LaneId, MessageNonce};
+use bp_messages::{ChainWithMessages, LaneId, MessageNonce};
 use bp_relayers::{RewardsAccountOwner, RewardsAccountParams};
-use bp_runtime::{Parachain, ParachainIdOf, RangeInclusiveExt, StaticStrProvider};
+use bp_runtime::{Chain, Parachain, ParachainIdOf, RangeInclusiveExt, StaticStrProvider};
 use codec::{Decode, Encode};
 use frame_support::{
 	dispatch::{CallableCallFor, DispatchInfo, Dispatchable, PostDispatchInfo},
@@ -346,7 +346,7 @@ where
 		// => let's prepare the correspondent account that pays reward/receives slashed amount
 		let reward_account_params = RewardsAccountParams::new(
 			Msgs::Id::get(),
-			Runtime::BridgedChainId::get(),
+			<Runtime as MessagesConfig<Msgs::Instance>>::BridgedChain::ID,
 			if call_info.is_receive_messages_proof_call() {
 				RewardsAccountOwner::ThisChain
 			} else {
@@ -498,7 +498,9 @@ where
 			parsed_call.messages_call_info().bundled_messages().checked_len().unwrap_or(0);
 
 		// a quick check to avoid invalid high-priority transactions
-		if bundled_messages > Runtime::MaxUnconfirmedMessagesAtInboundLane::get() {
+		let max_unconfirmed_messages_in_confirmation_tx = <Runtime as MessagesConfig<Msgs::Instance>>::BridgedChain
+			::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX;
+		if bundled_messages > max_unconfirmed_messages_in_confirmation_tx {
 			return None
 		}
 
@@ -817,7 +819,7 @@ mod tests {
 		RuntimeCall::BridgeMessages(MessagesCall::receive_messages_delivery_proof {
 			proof: FromBridgedChainMessagesDeliveryProof {
 				bridged_header_hash: Default::default(),
-				storage_proof: vec![],
+				storage_proof: Default::default(),
 				lane: TestLaneId::get(),
 			},
 			relayers_state: UnrewardedRelayersState {
@@ -900,8 +902,10 @@ mod tests {
 						best_stored_nonce: 100,
 					},
 					unrewarded_relayers: UnrewardedRelayerOccupation {
-						free_relayer_slots: MaxUnrewardedRelayerEntriesAtInboundLane::get(),
-						free_message_slots: MaxUnconfirmedMessagesAtInboundLane::get(),
+						free_relayer_slots:
+							BridgedUnderlyingChain::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
+						free_message_slots:
+							BridgedUnderlyingChain::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
 					},
 				}),
 			),
@@ -949,8 +953,10 @@ mod tests {
 						best_stored_nonce: 100,
 					},
 					unrewarded_relayers: UnrewardedRelayerOccupation {
-						free_relayer_slots: MaxUnrewardedRelayerEntriesAtInboundLane::get(),
-						free_message_slots: MaxUnconfirmedMessagesAtInboundLane::get(),
+						free_relayer_slots:
+							BridgedUnderlyingChain::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
+						free_message_slots:
+							BridgedUnderlyingChain::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
 					},
 				}),
 			),
@@ -988,8 +994,10 @@ mod tests {
 						best_stored_nonce: 100,
 					},
 					unrewarded_relayers: UnrewardedRelayerOccupation {
-						free_relayer_slots: MaxUnrewardedRelayerEntriesAtInboundLane::get(),
-						free_message_slots: MaxUnconfirmedMessagesAtInboundLane::get(),
+						free_relayer_slots:
+							BridgedUnderlyingChain::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
+						free_message_slots:
+							BridgedUnderlyingChain::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
 					},
 				},
 			)),
@@ -1171,12 +1179,12 @@ mod tests {
 				.unwrap();
 
 			let priority_of_max_messages_delivery = run_validate(message_delivery_call(
-				100 + MaxUnconfirmedMessagesAtInboundLane::get(),
+				100 + BridgedUnderlyingChain::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
 			))
 			.unwrap()
 			.priority;
 			let priority_of_more_than_max_messages_delivery = run_validate(message_delivery_call(
-				100 + MaxUnconfirmedMessagesAtInboundLane::get() + 1,
+				100 + BridgedUnderlyingChain::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX + 1,
 			))
 			.unwrap()
 			.priority;
