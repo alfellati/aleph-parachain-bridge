@@ -858,7 +858,7 @@ dependencies = [
  "sp-application-crypto",
  "sp-core",
  "sp-runtime",
- "sp-std 8.0.0",
+ "sp-std 8.0.0 (git+https://github.com/paritytech/substrate?branch=master)",
 ]
 
 [[package]]
@@ -6716,7 +6716,7 @@ dependencies = [
  "sp-core",
  "sp-io",
  "sp-runtime",
- "sp-std 8.0.0",
+ "sp-std 8.0.0 (git+https://github.com/paritytech/substrate?branch=master)",
  "sp-trie",
 ]
 
