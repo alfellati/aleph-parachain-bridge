@@ -32,9 +32,9 @@ pub type StoredAuthorityList<MaxBridgedAuthorities> =
 	BoundedVec<AuthorityId, MaxBridgedAuthorities>;
 
 /// Adapter for using `T::BridgedChain::MAX_BRIDGED_AUTHORITIES` in `BoundedVec`.
-pub struct StoredAuthorityListLimit<T, I>(PhantomData<(T, I)>);
+pub struct StoredAuthorityListLimit<T>(PhantomData<T>);
 
-impl<T: Config<I>, I: 'static> Get<u32> for StoredAuthorityListLimit<T, I> {
+impl<T: Config> Get<u32> for StoredAuthorityListLimit<T> {
 	fn get() -> u32 {
 		T::BridgedChain::MAX_AUTHORITIES_COUNT
 	}
@@ -42,17 +42,17 @@ impl<T: Config<I>, I: 'static> Get<u32> for StoredAuthorityListLimit<T, I> {
 
 /// A wrapper around bounded AlephBFT Authority List.
 #[derive(Clone, Decode, Encode, TypeInfo, MaxEncodedLen, RuntimeDebugNoBound)]
-#[scale_info(skip_type_params(T, I))]
-pub struct StoredAuthoritySet<T: Config<I>, I: 'static> {
+#[scale_info(skip_type_params(T))]
+pub struct StoredAuthoritySet<T: Config> {
 	/// List of AlephBFT authorities for the current round.
-	pub authorities: StoredAuthorityList<StoredAuthorityListLimit<T, I>>,
+	pub authorities: StoredAuthorityList<StoredAuthorityListLimit<T>>,
 }
 
-impl<T: Config<I>, I: 'static> StoredAuthoritySet<T, I> {
+impl<T: Config> StoredAuthoritySet<T> {
 	/// Try to create a new bounded AlephBFT Authority Set from unbounded list.
 	///
 	/// Returns error if number of authorities in the provided list is too large.
-	pub fn try_new(authorities: AuthorityList) -> Result<Self, Error<T, I>> {
+	pub fn try_new(authorities: AuthorityList) -> Result<Self, Error<T>> {
 		Ok(Self {
 			authorities: TryFrom::try_from(authorities)
 				.map_err(|_| Error::TooManyAuthoritiesInSet)?,
@@ -60,14 +60,14 @@ impl<T: Config<I>, I: 'static> StoredAuthoritySet<T, I> {
 	}
 }
 
-impl<T: Config<I>, I: 'static> Default for StoredAuthoritySet<T, I> {
+impl<T: Config> Default for StoredAuthoritySet<T> {
 	fn default() -> Self {
 		StoredAuthoritySet { authorities: BoundedVec::default() }
 	}
 }
 
-impl<T: Config<I>, I: 'static> From<StoredAuthoritySet<T, I>> for AuthoritySet {
-	fn from(t: StoredAuthoritySet<T, I>) -> Self {
+impl<T: Config> From<StoredAuthoritySet<T>> for AuthoritySet {
+	fn from(t: StoredAuthoritySet<T>) -> Self {
 		t.authorities.into()
 	}
 }

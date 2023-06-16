@@ -42,14 +42,13 @@ pub use pallet::*;
 
 pub const LOG_TARGET: &str = "runtime::bridge-aleph";
 
-pub type BridgedChain<T, I> = <T as Config<I>>::BridgedChain;
-pub type BridgedBlockNumber<T, I> = BlockNumberOf<<T as Config<I>>::BridgedChain>;
-pub type BridgedBlockHash<T, I> = HashOf<<T as Config<I>>::BridgedChain>;
-pub type BridgedBlockId<T, I> = HeaderId<BridgedBlockHash<T, I>, BridgedBlockNumber<T, I>>;
-pub type BridgedBlockHasher<T, I> = HasherOf<<T as Config<I>>::BridgedChain>;
-pub type BridgedHeader<T, I> = HeaderOf<<T as Config<I>>::BridgedChain>;
-pub type BridgedStoredHeaderData<T, I> =
-	StoredHeaderData<BridgedBlockNumber<T, I>, BridgedBlockHash<T, I>>;
+pub type BridgedChain<T> = <T as Config>::BridgedChain;
+pub type BridgedBlockNumber<T> = BlockNumberOf<<T as Config>::BridgedChain>;
+pub type BridgedBlockHash<T> = HashOf<<T as Config>::BridgedChain>;
+pub type BridgedBlockId<T> = HeaderId<BridgedBlockHash<T>, BridgedBlockNumber<T>>;
+pub type BridgedBlockHasher<T> = HasherOf<<T as Config>::BridgedChain>;
+pub type BridgedHeader<T> = HeaderOf<<T as Config>::BridgedChain>;
+pub type BridgedStoredHeaderData<T> = StoredHeaderData<BridgedBlockNumber<T>, BridgedBlockHash<T>>;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -59,33 +58,32 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 
 	#[pallet::config]
-	pub trait Config<I: 'static = ()>: frame_system::Config {
-		type RuntimeEvent: From<Event<Self, I>>
-			+ IsType<<Self as frame_system::Config>::RuntimeEvent>;
+	pub trait Config: frame_system::Config {
+		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 		type BridgedChain: ChainWithAleph;
 		#[pallet::constant]
 		type HeadersToKeep: Get<u32>;
 	}
 
 	#[pallet::pallet]
-	pub struct Pallet<T, I = ()>(PhantomData<(T, I)>);
+	pub struct Pallet<T>(PhantomData<T>);
 
 	#[pallet::hooks]
-	impl<T: Config<I>, I: 'static> Hooks<BlockNumberFor<T>> for Pallet<T, I> {
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_initialize(_n: BlockNumberFor<T>) -> Weight {
 			Weight::zero()
 		}
 	}
 
-	impl<T: Config<I>, I: 'static> OwnedBridgeModule<T> for Pallet<T, I> {
+	impl<T: Config> OwnedBridgeModule<T> for Pallet<T> {
 		const LOG_TARGET: &'static str = LOG_TARGET;
-		type OwnerStorage = PalletOwner<T, I>;
+		type OwnerStorage = PalletOwner<T>;
 		type OperatingMode = BasicOperatingMode;
-		type OperatingModeStorage = PalletOperatingMode<T, I>;
+		type OperatingModeStorage = PalletOperatingMode<T>;
 	}
 
 	#[pallet::call]
-	impl<T: Config<I>, I: 'static> Pallet<T, I> {
+	impl<T: Config> Pallet<T> {
 		/// Bootstrap the bridge pallet with an initial header and authority set from which to sync.
 		///
 		/// The initial configuration provided does not need to be the genesis header of the bridged
@@ -104,13 +102,13 @@ pub mod pallet {
 		#[pallet::weight((T::DbWeight::get().reads_writes(2, 5), DispatchClass::Operational))]
 		pub fn initialize(
 			origin: OriginFor<T>,
-			init_data: super::InitializationData<BridgedHeader<T, I>>,
+			init_data: super::InitializationData<BridgedHeader<T>>,
 		) -> DispatchResultWithPostInfo {
 			ensure_root(origin)?;
 
-			let init_allowed = !<BestFinalized<T, I>>::exists();
-			ensure!(init_allowed, <Error<T, I>>::AlreadyInitialized);
-			initialize_bridge::<T, I>(init_data.clone())?;
+			let init_allowed = !<BestFinalized<T>>::exists();
+			ensure!(init_allowed, <Error<T>>::AlreadyInitialized);
+			initialize_bridge::<T>(init_data.clone())?;
 
 			log::info!(
 				target: LOG_TARGET,
@@ -134,40 +132,37 @@ pub mod pallet {
 	/// Hash of the best finalized header.
 	#[pallet::storage]
 	#[pallet::getter(fn best_finalized)]
-	pub type BestFinalized<T: Config<I>, I: 'static = ()> =
-		StorageValue<_, BridgedBlockId<T, I>, OptionQuery>;
+	pub type BestFinalized<T: Config> = StorageValue<_, BridgedBlockId<T>, OptionQuery>;
 
 	/// A ring buffer of imported hashes. Ordered by insertion time.
 	#[pallet::storage]
-	pub(super) type ImportedHashes<T: Config<I>, I: 'static = ()> = StorageMap<
+	pub(super) type ImportedHashes<T: Config> = StorageMap<
 		Hasher = Identity,
 		Key = u32,
-		Value = BridgedBlockHash<T, I>,
+		Value = BridgedBlockHash<T>,
 		QueryKind = OptionQuery,
 		OnEmpty = GetDefault,
-		MaxValues = MaybeHeadersToKeep<T, I>,
+		MaxValues = MaybeHeadersToKeep<T>,
 	>;
 
 	/// Current ring buffer position.
 	#[pallet::storage]
-	pub(super) type ImportedHashesPointer<T: Config<I>, I: 'static = ()> =
-		StorageValue<_, u32, ValueQuery>;
+	pub(super) type ImportedHashesPointer<T: Config> = StorageValue<_, u32, ValueQuery>;
 
 	/// Relevant fields of imported headers.
 	#[pallet::storage]
-	pub type ImportedHeaders<T: Config<I>, I: 'static = ()> = StorageMap<
+	pub type ImportedHeaders<T: Config> = StorageMap<
 		Hasher = Identity,
-		Key = BridgedBlockHash<T, I>,
-		Value = BridgedStoredHeaderData<T, I>,
+		Key = BridgedBlockHash<T>,
+		Value = BridgedStoredHeaderData<T>,
 		QueryKind = OptionQuery,
 		OnEmpty = GetDefault,
-		MaxValues = MaybeHeadersToKeep<T, I>,
+		MaxValues = MaybeHeadersToKeep<T>,
 	>;
 
 	/// The current Aleph Authority set.
 	#[pallet::storage]
-	pub type CurrentAuthoritySet<T: Config<I>, I: 'static = ()> =
-		StorageValue<_, StoredAuthoritySet<T, I>, ValueQuery>;
+	pub type CurrentAuthoritySet<T: Config> = StorageValue<_, StoredAuthoritySet<T>, ValueQuery>;
 
 	/// Optional pallet owner.
 	///
@@ -176,57 +171,52 @@ pub mod pallet {
 	/// runtime methods may still be used to do that (i.e. democracy::referendum to update halt
 	/// flag directly or call the `halt_operations`).
 	#[pallet::storage]
-	pub type PalletOwner<T: Config<I>, I: 'static = ()> =
-		StorageValue<_, T::AccountId, OptionQuery>;
+	pub type PalletOwner<T: Config> = StorageValue<_, T::AccountId, OptionQuery>;
 
 	/// The current operating mode of the pallet.
 	///
 	/// Depending on the mode either all, or no transactions will be allowed.
 	#[pallet::storage]
-	pub type PalletOperatingMode<T: Config<I>, I: 'static = ()> =
-		StorageValue<_, BasicOperatingMode, ValueQuery>;
+	pub type PalletOperatingMode<T: Config> = StorageValue<_, BasicOperatingMode, ValueQuery>;
 
 	#[pallet::genesis_config]
-	pub struct GenesisConfig<T: Config<I>, I: 'static = ()> {
+	pub struct GenesisConfig<T: Config> {
 		pub owner: Option<T::AccountId>,
-		pub init_data: Option<super::InitializationData<BridgedHeader<T, I>>>,
+		pub init_data: Option<super::InitializationData<BridgedHeader<T>>>,
 	}
 
 	#[cfg(feature = "std")]
-	impl<T: Config<I>, I: 'static> Default for GenesisConfig<T, I> {
+	impl<T: Config> Default for GenesisConfig<T> {
 		fn default() -> Self {
 			Self { owner: None, init_data: None }
 		}
 	}
 
 	#[pallet::genesis_build]
-	impl<T: Config<I>, I: 'static> GenesisBuild<T, I> for GenesisConfig<T, I> {
+	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
 		fn build(&self) {
 			if let Some(ref owner) = self.owner {
-				<PalletOwner<T, I>>::put(owner);
+				<PalletOwner<T>>::put(owner);
 			}
 
 			if let Some(init_data) = self.init_data.clone() {
-				initialize_bridge::<T, I>(init_data).expect("genesis config is correct; qed");
+				initialize_bridge::<T>(init_data).expect("genesis config is correct; qed");
 			} else {
 				// Since the bridge hasn't been initialized we shouldn't allow anyone to perform
 				// transactions.
-				<PalletOperatingMode<T, I>>::put(BasicOperatingMode::Halted);
+				<PalletOperatingMode<T>>::put(BasicOperatingMode::Halted);
 			}
 		}
 	}
 
 	#[pallet::event]
-	pub enum Event<T: Config<I>, I: 'static = ()> {
+	pub enum Event<T: Config> {
 		/// Best finalized chain header has been updated to the header with given number and hash.
-		UpdatedBestFinalizedHeader {
-			number: BridgedBlockNumber<T, I>,
-			hash: BridgedBlockHash<T, I>,
-		},
+		UpdatedBestFinalizedHeader { number: BridgedBlockNumber<T>, hash: BridgedBlockHash<T> },
 	}
 
 	#[pallet::error]
-	pub enum Error<T, I = ()> {
+	pub enum Error<T> {
 		/// The header being imported is older than the best finalized header known to the pallet.
 		OldHeader,
 		/// The pallet is not yet initialized.
@@ -243,32 +233,29 @@ pub mod pallet {
 	///
 	/// Note this function solely takes care of updating the storage and pruning old entries,
 	/// but does not verify the validity of such import.
-	fn insert_header<T: Config<I>, I: 'static>(
-		header: BridgedHeader<T, I>,
-		hash: BridgedBlockHash<T, I>,
-	) {
-		let index = <ImportedHashesPointer<T, I>>::get();
-		let pruning = <ImportedHashes<T, I>>::try_get(index);
-		<BestFinalized<T, I>>::put(HeaderId(*header.number(), hash));
-		<ImportedHeaders<T, I>>::insert(hash, header.build());
-		<ImportedHashes<T, I>>::insert(index, hash);
+	fn insert_header<T: Config>(header: BridgedHeader<T>, hash: BridgedBlockHash<T>) {
+		let index = <ImportedHashesPointer<T>>::get();
+		let pruning = <ImportedHashes<T>>::try_get(index);
+		<BestFinalized<T>>::put(HeaderId(*header.number(), hash));
+		<ImportedHeaders<T>>::insert(hash, header.build());
+		<ImportedHashes<T>>::insert(index, hash);
 
 		// Update ring buffer pointer and remove old header.
-		<ImportedHashesPointer<T, I>>::put((index + 1) % T::HeadersToKeep::get());
+		<ImportedHashesPointer<T>>::put((index + 1) % T::HeadersToKeep::get());
 		if let Ok(hash) = pruning {
 			log::debug!(target: LOG_TARGET, "Pruning old header: {:?}.", hash);
-			<ImportedHeaders<T, I>>::remove(hash);
+			<ImportedHeaders<T>>::remove(hash);
 		}
 	}
 
 	/// Since this writes to storage with no real checks this should only be used in functions that
 	/// were called by a trusted origin.
-	fn initialize_bridge<T: Config<I>, I: 'static>(
-		init_params: super::InitializationData<BridgedHeader<T, I>>,
-	) -> Result<(), Error<T, I>> {
+	fn initialize_bridge<T: Config>(
+		init_params: super::InitializationData<BridgedHeader<T>>,
+	) -> Result<(), Error<T>> {
 		let super::InitializationData { header, authority_list, operating_mode } = init_params;
 		let authority_set_length = authority_list.len();
-		let authority_set = StoredAuthoritySet::<T, I>::try_new(authority_list)
+		let authority_set = StoredAuthoritySet::<T>::try_new(authority_list)
 			.map_err(|e| {
 				log::error!(
 					target: LOG_TARGET,
@@ -280,41 +267,41 @@ pub mod pallet {
 			})?;
 		let initial_hash = header.hash();
 
-		<ImportedHashesPointer<T, I>>::put(0);
-		insert_header::<T, I>(*header, initial_hash);
+		<ImportedHashesPointer<T>>::put(0);
+		insert_header::<T>(*header, initial_hash);
 
-		<CurrentAuthoritySet<T, I>>::put(authority_set);
-		<PalletOperatingMode<T, I>>::put(operating_mode);
+		<CurrentAuthoritySet<T>>::put(authority_set);
+		<PalletOperatingMode<T>>::put(operating_mode);
 
 		Ok(())
 	}
 
 	/// Adapter for using `Config::HeadersToKeep` as `MaxValues` bound in our storage maps.
-	pub struct MaybeHeadersToKeep<T, I>(PhantomData<(T, I)>);
+	pub struct MaybeHeadersToKeep<T>(PhantomData<T>);
 
 	// this implementation is required to use the struct as `MaxValues`
-	impl<T: Config<I>, I: 'static> Get<Option<u32>> for MaybeHeadersToKeep<T, I> {
+	impl<T: Config> Get<Option<u32>> for MaybeHeadersToKeep<T> {
 		fn get() -> Option<u32> {
 			Some(T::HeadersToKeep::get())
 		}
 	}
 }
 
-impl<T: Config<I>, I: 'static> Pallet<T, I> {
+impl<T: Config> Pallet<T> {
 	/// Get the best finalized block number.
-	pub fn best_finalized_number() -> Option<BridgedBlockNumber<T, I>> {
-		BestFinalized::<T, I>::get().map(|id| id.number())
+	pub fn best_finalized_number() -> Option<BridgedBlockNumber<T>> {
+		BestFinalized::<T>::get().map(|id| id.number())
 	}
 }
 
 /// Bridge Aleph pallet as header chain.
-pub type AlephChainHeaders<T, I> = Pallet<T, I>;
+pub type AlephChainHeaders<T> = Pallet<T>;
 
-impl<T: Config<I>, I: 'static> HeaderChain<BridgedChain<T, I>> for AlephChainHeaders<T, I> {
+impl<T: Config> HeaderChain<BridgedChain<T>> for AlephChainHeaders<T> {
 	fn finalized_header_state_root(
-		header_hash: HashOf<BridgedChain<T, I>>,
-	) -> Option<HashOf<BridgedChain<T, I>>> {
-		ImportedHeaders::<T, I>::get(header_hash).map(|h| h.state_root)
+		header_hash: HashOf<BridgedChain<T>>,
+	) -> Option<HashOf<BridgedChain<T>>> {
+		ImportedHeaders::<T>::get(header_hash).map(|h| h.state_root)
 	}
 }
 

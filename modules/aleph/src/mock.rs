@@ -32,8 +32,8 @@ use sp_runtime::{
 };
 
 pub type AccountId = u64;
-pub type TestHeader = crate::BridgedHeader<TestRuntime, ()>;
-pub type TestNumber = crate::BridgedBlockNumber<TestRuntime, ()>;
+pub type TestHeader = crate::BridgedHeader<TestRuntime>;
+pub type TestNumber = crate::BridgedBlockNumber<TestRuntime>;
 
 type Block = frame_system::mocking::MockBlock<TestRuntime>;
 type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<TestRuntime>;
