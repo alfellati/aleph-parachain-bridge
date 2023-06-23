@@ -19,18 +19,16 @@
 // TODO: this is almost exact copy of `millau_messages.rs` from Rialto runtime.
 // Should be extracted to a separate crate and reused here.
 
-use crate::{MillauGrandpaInstance, Runtime, RuntimeOrigin, WithMillauMessagesInstance};
+use crate::{Runtime, WithMillauMessagesInstance};
 
 use bp_messages::LaneId;
-use bridge_runtime_common::{
-	messages::{self, MessageBridge},
-	messages_xcm_extension::{XcmBlobHauler, XcmBlobHaulerAdapter},
+use bridge_runtime_common::messages_xcm_extension::{
+	LaneIdFromChainId, XcmBlobHauler, XcmBlobHaulerAdapter,
 };
-use frame_support::{parameter_types, weights::Weight, RuntimeDebug};
+use frame_support::{parameter_types, weights::Weight};
+use sp_core::Get;
 use xcm_builder::HaulBlobExporter;
 
-/// Default lane that is used to send messages to Millau.
-pub const XCM_LANE: LaneId = LaneId([0, 0, 0, 0]);
 /// Weight of 2 XCM instructions is for simple `Trap(42)` program, coming through bridge
 /// (it is prepended with `UniversalOrigin` instruction). It is used just for simplest manual
 /// tests, confirming that we don't break encoding somewhere between.
@@ -44,54 +42,12 @@ parameter_types! {
 	pub const WeightCredit: Weight = BASE_XCM_WEIGHT_TWICE;
 }
 
-/// Message payload for RialtoParachain -> Millau messages.
-pub type ToMillauMessagePayload = messages::source::FromThisChainMessagePayload;
-
-/// Message payload for Millau -> RialtoParachain messages.
-pub type FromMillauMessagePayload = messages::target::FromBridgedChainMessagePayload;
-
 /// Call-dispatch based message dispatch for Millau -> RialtoParachain messages.
 pub type FromMillauMessageDispatch =
 	bridge_runtime_common::messages_xcm_extension::XcmBlobMessageDispatch<
 		crate::OnRialtoParachainBlobDispatcher,
 		(),
 	>;
-
-/// Millau <-> RialtoParachain message bridge.
-#[derive(RuntimeDebug, Clone, Copy)]
-pub struct WithMillauMessageBridge;
-
-impl MessageBridge for WithMillauMessageBridge {
-	const BRIDGED_MESSAGES_PALLET_NAME: &'static str =
-		bp_rialto_parachain::WITH_RIALTO_PARACHAIN_MESSAGES_PALLET_NAME;
-
-	type ThisChain = RialtoParachain;
-	type BridgedChain = Millau;
-	type BridgedHeaderChain =
-		pallet_bridge_grandpa::GrandpaChainHeaders<Runtime, MillauGrandpaInstance>;
-}
-
-/// RialtoParachain chain from message lane point of view.
-#[derive(RuntimeDebug, Clone, Copy)]
-pub struct RialtoParachain;
-
-impl messages::UnderlyingChainProvider for RialtoParachain {
-	type Chain = bp_rialto_parachain::RialtoParachain;
-}
-
-impl messages::ThisChainWithMessages for RialtoParachain {
-	type RuntimeOrigin = RuntimeOrigin;
-}
-
-/// Millau chain from message lane point of view.
-#[derive(RuntimeDebug, Clone, Copy)]
-pub struct Millau;
-
-impl messages::UnderlyingChainProvider for Millau {
-	type Chain = bp_millau::Millau;
-}
-
-impl messages::BridgedChainWithMessages for Millau {}
 
 /// Export XCM messages to be relayed to Millau.
 pub type ToMillauBlobExporter =
@@ -104,7 +60,7 @@ impl XcmBlobHauler for ToMillauXcmBlobHauler {
 	type MessageSender = pallet_bridge_messages::Pallet<Runtime, WithMillauMessagesInstance>;
 
 	fn xcm_lane() -> LaneId {
-		XCM_LANE
+		LaneIdFromChainId::<Runtime, WithMillauMessagesInstance>::get()
 	}
 }
 
@@ -112,13 +68,11 @@ impl XcmBlobHauler for ToMillauXcmBlobHauler {
 mod tests {
 	use super::*;
 	use crate::{MillauGrandpaInstance, Runtime, WithMillauMessagesInstance};
-	use bp_runtime::Chain;
 	use bridge_runtime_common::{
 		assert_complete_bridge_types,
 		integrity::{
-			assert_complete_bridge_constants, check_message_lane_weights,
-			AssertBridgeMessagesPalletConstants, AssertBridgePalletNames, AssertChainConstants,
-			AssertCompleteBridgeConstants,
+			assert_complete_with_relay_chain_bridge_constants, check_message_lane_weights,
+			AssertChainConstants, AssertCompleteBridgeConstants,
 		},
 	};
 
@@ -142,35 +96,30 @@ mod tests {
 			runtime: Runtime,
 			with_bridged_chain_grandpa_instance: MillauGrandpaInstance,
 			with_bridged_chain_messages_instance: WithMillauMessagesInstance,
-			bridge: WithMillauMessageBridge,
 			this_chain: bp_rialto_parachain::RialtoParachain,
 			bridged_chain: bp_millau::Millau,
 		);
 
-		assert_complete_bridge_constants::<
+		assert_complete_with_relay_chain_bridge_constants::<
 			Runtime,
 			MillauGrandpaInstance,
 			WithMillauMessagesInstance,
-			WithMillauMessageBridge,
 		>(AssertCompleteBridgeConstants {
 			this_chain_constants: AssertChainConstants {
 				block_length: bp_rialto_parachain::BlockLength::get(),
 				block_weights: bp_rialto_parachain::BlockWeights::get(),
 			},
-			messages_pallet_constants: AssertBridgeMessagesPalletConstants {
-				max_unrewarded_relayers_in_bridged_confirmation_tx:
-					bp_millau::MAX_UNREWARDED_RELAYERS_IN_CONFIRMATION_TX,
-				max_unconfirmed_messages_in_bridged_confirmation_tx:
-					bp_millau::MAX_UNCONFIRMED_MESSAGES_IN_CONFIRMATION_TX,
-				bridged_chain_id: bp_millau::Millau::ID,
-			},
-			pallet_names: AssertBridgePalletNames {
-				with_this_chain_messages_pallet_name:
-					bp_rialto_parachain::WITH_RIALTO_PARACHAIN_MESSAGES_PALLET_NAME,
-				with_bridged_chain_grandpa_pallet_name: bp_millau::WITH_MILLAU_GRANDPA_PALLET_NAME,
-				with_bridged_chain_messages_pallet_name:
-					bp_millau::WITH_MILLAU_MESSAGES_PALLET_NAME,
-			},
 		});
+	}
+
+	#[test]
+	fn rialto_parachain_millau_bridge_identifier_did_not_changed() {
+		// there's nothing criminal if it is changed, but then thou need to fix it across
+		// all deployments scripts, alerts and so on
+		assert_eq!(
+			*ToMillauXcmBlobHauler::xcm_lane().as_ref(),
+			hex_literal::hex!("6aa61bff567db6b5d5f0cb815ee6d8f5ac630e222a95700cb3d594134e3805de")
+				.into(),
+		);
 	}
 }

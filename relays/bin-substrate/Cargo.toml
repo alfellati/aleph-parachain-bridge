@@ -12,14 +12,15 @@ async-trait = "0.1"
 codec = { package = "parity-scale-codec", version = "3.1.5" }
 futures = "0.3.28"
 hex = "0.4"
-log = "0.4.18"
+log = "0.4.19"
 num-format = "0.4"
 num-traits = "0.2"
 rbtag = "0.3"
+rustc-hex = "2.1"
 structopt = "0.3"
 signal-hook = "0.3.15"
 signal-hook-async-std = "0.2.2"
-strum = { version = "0.24.1", features = ["derive"] }
+strum = { version = "0.25.0", features = ["derive"] }
 
 # Bridge dependencies
 bp-header-chain = { path = "../../primitives/header-chain" }
@@ -73,5 +74,5 @@ xcm-executor = { git = "https://github.com/paritytech/polkadot", branch = "maste
 bp-test-utils = { path = "../../primitives/test-utils" }
 hex-literal = "0.4"
 sp-keyring = { git = "https://github.com/paritytech/substrate", branch = "master" }
-tempfile = "3.5"
+tempfile = "3.6"
 finality-grandpa = { version = "0.16.2" }

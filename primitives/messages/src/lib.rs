@@ -22,21 +22,26 @@
 
 use bp_header_chain::HeaderChainError;
 use bp_runtime::{
-	messages::MessageDispatchResult, BasicOperatingMode, Chain, OperatingMode, RangeInclusiveExt,
-	UnderlyingChainOf, UnderlyingChainProvider, VecDbError,
+	messages::MessageDispatchResult, AccountIdOf, BasicOperatingMode, Chain, HashOf, OperatingMode,
+	RangeInclusiveExt, StorageProofError, UnderlyingChainOf, UnderlyingChainProvider,
 };
 use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::{PalletError, RuntimeDebug};
 // Weight is reexported to avoid additional frame-support dependencies in related crates.
 pub use frame_support::weights::Weight;
 use scale_info::TypeInfo;
+use serde::{Deserialize, Serialize};
 use source_chain::RelayersRewards;
-use sp_core::TypeId;
+use sp_core::{TypeId, H256};
+use sp_io::hashing::blake2_256;
 use sp_std::{collections::vec_deque::VecDeque, ops::RangeInclusive, prelude::*};
 
 pub mod source_chain;
 pub mod storage_keys;
 pub mod target_chain;
+
+/// Hard limit on message size that can be sent over the bridge.
+pub const HARD_MESSAGE_SIZE_LIMIT: u32 = 64 * 1024;
 
 /// Substrate-based chain with messaging support.
 pub trait ChainWithMessages: Chain {
@@ -97,7 +102,14 @@ pub fn maximal_incoming_message_size(max_extrinsic_size: u32) -> u32 {
 	// is enormously large, it should be several dozens/hundreds of bytes. The delivery
 	// transaction also contains signatures and signed extensions. Because of this, we reserve
 	// 1/3 of the the maximal extrinsic size for this data.
-	max_extrinsic_size / 3 * 2
+	//
+	// **ANOTHER IMPORTANT NOTE**: large message means not only larger proofs and heavier
+	// proof verification, but also heavier message decoding and dispatch. So we have a hard
+	// limit of `64Kb`, which in practice limits the message size on all chains. Without this
+	// limit the **weight** (not the size) of the message will be higher than the
+	// `Self::maximal_incoming_message_dispatch_weight()`.
+
+	sp_std::cmp::min(max_extrinsic_size / 3 * 2, HARD_MESSAGE_SIZE_LIMIT)
 }
 
 impl<T> ChainWithMessages for T
@@ -114,8 +126,19 @@ where
 }
 
 /// Messages pallet operating mode.
-#[derive(Encode, Decode, Clone, Copy, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
+#[derive(
+	Encode,
+	Decode,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	RuntimeDebug,
+	TypeInfo,
+	MaxEncodedLen,
+	Serialize,
+	Deserialize,
+)]
 pub enum MessagesOperatingMode {
 	/// Basic operating mode (Normal/Halted)
 	Basic(BasicOperatingMode),
@@ -144,11 +167,72 @@ impl OperatingMode for MessagesOperatingMode {
 	}
 }
 
-/// Lane id which implements `TypeId`.
+/// Bridge lane identifier.
+///
+/// Lane connects two endpoints at both sides of the bridge. We assume that every endpoint
+/// has its own unique identifier. We want lane identifiers to be the same on the both sides
+/// of the bridge (and naturally unique across global consensus if endpoints have unique
+/// identifiers). So lane id is the hash (`blake2_256`) of **ordered** encoded locations
+/// concatenation (separated by some binary data). I.e.:
+///
+/// ```nocompile
+/// let endpoint1 = X2(GlobalConsensus(NetworkId::Rococo), Parachain(42));
+/// let endpoint2 = X2(GlobalConsensus(NetworkId::Wococo), Parachain(777));
+///
+/// let final_lane_key = if endpoint1 < endpoint2 {
+///     (endpoint1, VALUES_SEPARATOR, endpoint2)
+/// } else {
+///     (endpoint2, VALUES_SEPARATOR, endpoint1)
+/// }.using_encoded(blake2_256);
+/// ```
 #[derive(
-	Clone, Copy, Decode, Default, Encode, Eq, Ord, PartialOrd, PartialEq, TypeInfo, MaxEncodedLen,
+	Clone,
+	Copy,
+	Decode,
+	Default,
+	Encode,
+	Eq,
+	Ord,
+	PartialOrd,
+	PartialEq,
+	TypeInfo,
+	MaxEncodedLen,
+	Serialize,
+	Deserialize,
 )]
-pub struct LaneId(pub [u8; 4]);
+pub struct LaneId(H256);
+
+impl LaneId {
+	/// Create lane identifier from two locations.
+	pub fn new<T: Ord + Encode>(endpoint1: T, endpoint2: T) -> Self {
+		const VALUES_SEPARATOR: [u8; 31] = *b"bridges-lane-id-value-separator";
+
+		LaneId(
+			if endpoint1 < endpoint2 {
+				(endpoint1, VALUES_SEPARATOR, endpoint2)
+			} else {
+				(endpoint2, VALUES_SEPARATOR, endpoint1)
+			}
+			.using_encoded(blake2_256)
+			.into(),
+		)
+	}
+
+	/// Create lane identifier from given hash.
+	///
+	/// There's no `From<H256>` implementation for the `LaneId`, because using this conversion
+	/// in a wrong way (i.e. computing hash of endpoints manually) may lead to issues. So we
+	/// want the call to be explicit.
+	pub const fn from_inner(hash: H256) -> Self {
+		LaneId(hash)
+	}
+}
+
+impl core::fmt::Display for LaneId {
+	fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
+		self.0.fmt(fmt)
+	}
+}
 
 impl core::fmt::Debug for LaneId {
 	fn fmt(&self, fmt: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -156,14 +240,29 @@ impl core::fmt::Debug for LaneId {
 	}
 }
 
-impl AsRef<[u8]> for LaneId {
-	fn as_ref(&self) -> &[u8] {
+impl AsRef<H256> for LaneId {
+	fn as_ref(&self) -> &H256 {
 		&self.0
 	}
 }
 
 impl TypeId for LaneId {
 	const TYPE_ID: [u8; 4] = *b"blan";
+}
+
+/// Lane state.
+#[derive(Clone, Copy, Decode, Encode, Eq, PartialEq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+pub enum LaneState {
+	/// Lane is closed and all attempts to send/receive messages to/from this lane
+	/// will fail.
+	///
+	/// Keep in mind that the lane has two ends and the state of the same lane at
+	/// its ends may be different. Those who are controlling/serving the lane
+	/// and/or sending messages over the lane, have to coordinate their actions on
+	/// both ends to make sure that lane is operating smoothly on both ends.
+	Closed,
+	/// Lane is opened and messages may be sent/received over it.
+	Opened,
 }
 
 /// Message nonce. Valid messages will never have 0 nonce.
@@ -196,6 +295,11 @@ pub struct Message {
 /// Inbound lane data.
 #[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, TypeInfo)]
 pub struct InboundLaneData<RelayerId> {
+	/// Inbound lane state.
+	///
+	/// If state is `Closed`, then all attempts to deliver messages to this end will fail.
+	pub state: LaneState,
+
 	/// Identifiers of relayers and messages that they have delivered to this lane (ordered by
 	/// message nonce).
 	///
@@ -228,11 +332,20 @@ pub struct InboundLaneData<RelayerId> {
 
 impl<RelayerId> Default for InboundLaneData<RelayerId> {
 	fn default() -> Self {
-		InboundLaneData { relayers: VecDeque::new(), last_confirmed_nonce: 0 }
+		InboundLaneData {
+			state: LaneState::Closed,
+			relayers: VecDeque::new(),
+			last_confirmed_nonce: 0,
+		}
 	}
 }
 
 impl<RelayerId> InboundLaneData<RelayerId> {
+	/// Returns default inbound lane data with opened state.
+	pub fn opened() -> Self {
+		InboundLaneData { state: LaneState::Opened, ..Default::default() }
+	}
+
 	/// Returns approximate size of the struct, given a number of entries in the `relayers` set and
 	/// size of each entry.
 	///
@@ -318,7 +431,7 @@ pub struct UnrewardedRelayer<RelayerId> {
 }
 
 /// Received messages with their dispatch result.
-#[derive(Clone, Default, Encode, Decode, RuntimeDebug, PartialEq, Eq, TypeInfo)]
+#[derive(Clone, Encode, Decode, RuntimeDebug, PartialEq, Eq, TypeInfo)]
 pub struct ReceivedMessages<DispatchLevelResult> {
 	/// Id of the lane which is receiving messages.
 	pub lane: LaneId,
@@ -429,6 +542,10 @@ impl<RelayerId> From<&InboundLaneData<RelayerId>> for UnrewardedRelayersState {
 /// Outbound lane data.
 #[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, TypeInfo, MaxEncodedLen)]
 pub struct OutboundLaneData {
+	/// Lane state.
+	///
+	/// If state is `Closed`, then all attempts to send messages messages at this end will fail.
+	pub state: LaneState,
 	/// Nonce of the oldest message that we haven't yet pruned. May point to not-yet-generated
 	/// message if all sent messages are already pruned.
 	pub oldest_unpruned_nonce: MessageNonce,
@@ -438,9 +555,17 @@ pub struct OutboundLaneData {
 	pub latest_generated_nonce: MessageNonce,
 }
 
+impl OutboundLaneData {
+	/// Returns default outbound lane data with opened state.
+	pub fn opened() -> Self {
+		OutboundLaneData { state: LaneState::Opened, ..Default::default() }
+	}
+}
+
 impl Default for OutboundLaneData {
 	fn default() -> Self {
 		OutboundLaneData {
+			state: LaneState::Closed,
 			// it is 1 because we're pruning everything in [oldest_unpruned_nonce;
 			// latest_received_nonce]
 			oldest_unpruned_nonce: 1,
@@ -471,6 +596,13 @@ where
 	relayers_rewards
 }
 
+/// The `BridgeMessagesCall` used by a chain.
+pub type BridgeMessagesCallOf<C> = BridgeMessagesCall<
+	AccountIdOf<C>,
+	target_chain::FromBridgedChainMessagesProof<HashOf<C>>,
+	source_chain::FromBridgedChainMessagesDeliveryProof<HashOf<C>>,
+>;
+
 /// A minimized version of `pallet-bridge-messages::Call` that can be used without a runtime.
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone, TypeInfo)]
 #[allow(non_camel_case_types)]
@@ -499,19 +631,19 @@ pub enum VerificationError {
 	/// Error returned by the bridged header chain.
 	HeaderChain(HeaderChainError),
 	/// Error returned while reading/decoding inbound lane data from the storage proof.
-	InboundLaneStorage(VecDbError),
+	InboundLaneStorage(StorageProofError),
 	/// The declared message weight is incorrect.
 	InvalidMessageWeight,
 	/// Declared messages count doesn't match actual value.
 	MessagesCountMismatch,
-	/// Error returned while reading/decoding message data from the `VecDb`.
-	MessageStorage(VecDbError),
+	/// Error returned while reading/decoding message data from the `VerifiedStorageProof`.
+	MessageStorage(StorageProofError),
 	/// The message is too large.
 	MessageTooLarge,
-	/// Error returned while reading/decoding outbound lane data from the `VecDb`.
-	OutboundLaneStorage(VecDbError),
-	/// `VecDb` related error.
-	VecDb(VecDbError),
+	/// Error returned while reading/decoding outbound lane data from the `VerifiedStorageProof`.
+	OutboundLaneStorage(StorageProofError),
+	/// Storage proof related error.
+	StorageProof(StorageProofError),
 	/// Custom error
 	Other(#[codec(skip)] &'static str),
 }
@@ -521,8 +653,15 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn lane_is_closed_by_default() {
+		assert_eq!(InboundLaneData::<()>::default().state, LaneState::Closed);
+		assert_eq!(OutboundLaneData::default().state, LaneState::Closed);
+	}
+
+	#[test]
 	fn total_unrewarded_messages_does_not_overflow() {
 		let lane_data = InboundLaneData {
+			state: LaneState::Opened,
 			relayers: vec![
 				UnrewardedRelayer { relayer: 1, messages: DeliveredMessages::new(0) },
 				UnrewardedRelayer {
@@ -550,6 +689,7 @@ mod tests {
 		for (relayer_entries, messages_count) in test_cases {
 			let expected_size = InboundLaneData::<u8>::encoded_size_hint(relayer_entries as _);
 			let actual_size = InboundLaneData {
+				state: LaneState::Opened,
 				relayers: (1u8..=relayer_entries)
 					.map(|i| UnrewardedRelayer {
 						relayer: i,
@@ -579,7 +719,50 @@ mod tests {
 	}
 
 	#[test]
-	fn lane_id_debug_format_matches_inner_array_format() {
-		assert_eq!(format!("{:?}", LaneId([0, 0, 0, 0])), format!("{:?}", [0, 0, 0, 0]),);
+	fn lane_id_debug_format_matches_inner_hash_format() {
+		assert_eq!(
+			format!("{:?}", LaneId(H256::from([1u8; 32]))),
+			format!("{:?}", H256::from([1u8; 32])),
+		);
+	}
+
+	#[test]
+	fn lane_id_is_generated_using_ordered_endpoints() {
+		assert_eq!(LaneId::new(1, 2), LaneId::new(2, 1));
+	}
+
+	#[test]
+	fn lane_id_is_different_for_different_endpoints() {
+		assert_ne!(LaneId::new(1, 2), LaneId::new(1, 3));
+	}
+
+	#[test]
+	fn lane_id_is_different_even_if_arguments_has_partial_matching_encoding() {
+		/// Some artificial type that generates the same encoding for different values
+		/// concatenations. I.e. the encoding for `(Either::Two(1, 2), Either::Two(3, 4))`
+		/// is the same as encoding of `(Either::Three(1, 2, 3), Either::One(4))`.
+		/// In practice, this type is not useful, because you can't do a proper decoding.
+		/// But still there may be some collisions even in proper types.
+		#[derive(Eq, Ord, PartialEq, PartialOrd)]
+		enum Either {
+			Three(u64, u64, u64),
+			Two(u64, u64),
+			One(u64),
+		}
+
+		impl codec::Encode for Either {
+			fn encode(&self) -> Vec<u8> {
+				match *self {
+					Self::One(a) => a.encode(),
+					Self::Two(a, b) => (a, b).encode(),
+					Self::Three(a, b, c) => (a, b, c).encode(),
+				}
+			}
+		}
+
+		assert_ne!(
+			LaneId::new(Either::Two(1, 2), Either::Two(3, 4)),
+			LaneId::new(Either::Three(1, 2, 3), Either::One(4)),
+		);
 	}
 }

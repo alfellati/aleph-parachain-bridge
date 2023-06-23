@@ -14,93 +14,163 @@
 // You should have received a copy of the GNU General Public License
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::error::Result;
+use crate::error::Result as ClientResult;
 
 use async_std::{
 	channel::{bounded, Receiver, Sender},
 	stream::StreamExt,
 };
-use futures::{future::FutureExt, Stream};
+use futures::{FutureExt, Stream};
+use jsonrpsee::core::RpcResult;
 use sp_runtime::DeserializeOwned;
-use std::future::Future;
+use std::{
+	fmt::Debug,
+	pin::Pin,
+	result::Result as StdResult,
+	task::{Context, Poll},
+};
 
 /// Once channel reaches this capacity, the subscription breaks.
 const CHANNEL_CAPACITY: usize = 128;
 
-/// Underlying subscription type.
-pub type UnderlyingSubscription<T> = Box<dyn Stream<Item = Result<T>> + Unpin + Send>;
+/// Structure describing a stream.
+#[derive(Clone)]
+pub struct StreamDescription {
+	stream_name: String,
+	chain_name: String,
+}
+
+impl StreamDescription {
+	/// Create a new instance of `StreamDescription`.
+	pub fn new(stream_name: String, chain_name: String) -> Self {
+		Self { stream_name, chain_name }
+	}
+
+	/// Get a stream description.
+	fn get(&self) -> String {
+		format!("{} stream of {}", self.stream_name, self.chain_name)
+	}
+}
+
+/// Chainable stream that transforms items of type `Result<T, E>` to items of type `T`.
+///
+/// If it encounters an item of type `Err`, it returns `Poll::Ready(None)`
+/// and terminates the underlying stream.
+struct Unwrap<S: Stream<Item = StdResult<T, E>>, T, E> {
+	desc: StreamDescription,
+	stream: Option<S>,
+}
+
+impl<S: Stream<Item = StdResult<T, E>>, T, E> Unwrap<S, T, E> {
+	/// Create a new instance of `Unwrap`.
+	pub fn new(desc: StreamDescription, stream: S) -> Self {
+		Self { desc, stream: Some(stream) }
+	}
+}
+
+impl<S: Stream<Item = StdResult<T, E>> + Unpin, T: DeserializeOwned, E: Debug> Stream
+	for Unwrap<S, T, E>
+{
+	type Item = T;
+
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		Poll::Ready(match self.stream.as_mut() {
+			Some(subscription) => match futures::ready!(Pin::new(subscription).poll_next(cx)) {
+				Some(Ok(item)) => Some(item),
+				Some(Err(e)) => {
+					self.stream.take();
+					log::debug!(
+						target: "bridge",
+						"{} has returned error: {:?}. It may need to be restarted",
+						self.desc.get(),
+						e,
+					);
+					None
+				},
+				None => {
+					self.stream.take();
+					log::debug!(
+						target: "bridge",
+						"{} has returned `None`. It may need to be restarted",
+						self.desc.get()
+					);
+					None
+				},
+			},
+			None => None,
+		})
+	}
+}
 
 /// Subscription factory that produces subscriptions, sharing the same background thread.
 #[derive(Clone)]
-pub struct SharedSubscriptionFactory<T> {
-	subscribers_sender: Sender<Sender<Option<T>>>,
+pub struct SubscriptionBroadcaster<T> {
+	desc: StreamDescription,
+	subscribers_sender: Sender<Sender<T>>,
 }
 
-impl<T: 'static + Clone + DeserializeOwned + Send> SharedSubscriptionFactory<T> {
+impl<T: 'static + Clone + DeserializeOwned + Send> SubscriptionBroadcaster<T> {
 	/// Create new subscription factory.
-	pub async fn new(
-		chain_name: String,
-		item_type: String,
-		subscribe: impl Future<Output = Result<UnderlyingSubscription<T>>> + Send + 'static,
-	) -> Self {
+	pub fn new(subscription: Subscription<T>) -> StdResult<Self, Subscription<T>> {
+		// It doesn't make sense to further broadcast a broadcasted subscription.
+		if subscription.is_broadcasted {
+			return Err(subscription)
+		}
+
+		let desc = subscription.desc().clone();
 		let (subscribers_sender, subscribers_receiver) = bounded(CHANNEL_CAPACITY);
-		async_std::task::spawn(background_worker(
-			chain_name,
-			item_type,
-			subscribe,
-			subscribers_receiver,
-		));
-		Self { subscribers_sender }
+		async_std::task::spawn(background_worker(subscription, subscribers_receiver));
+		Ok(Self { desc, subscribers_sender })
 	}
 
 	/// Produce new subscription.
-	pub async fn subscribe(&self) -> Result<Subscription<T>> {
+	pub async fn subscribe(&self) -> ClientResult<Subscription<T>> {
 		let (items_sender, items_receiver) = bounded(CHANNEL_CAPACITY);
 		self.subscribers_sender.try_send(items_sender)?;
 
-		Ok(Subscription { items_receiver, subscribers_sender: self.subscribers_sender.clone() })
+		Ok(Subscription::new_broadcasted(self.desc.clone(), items_receiver))
 	}
 }
 
 /// Subscription to some chain events.
 pub struct Subscription<T> {
-	items_receiver: Receiver<Option<T>>,
-	subscribers_sender: Sender<Sender<Option<T>>>,
+	desc: StreamDescription,
+	subscription: Box<dyn Stream<Item = T> + Unpin + Send>,
+	is_broadcasted: bool,
 }
 
 impl<T: 'static + Clone + DeserializeOwned + Send> Subscription<T> {
-	/// Create new subscription.
-	pub async fn new(
-		chain_name: String,
-		item_type: String,
-		subscription: UnderlyingSubscription<T>,
-	) -> Result<Self> {
-		SharedSubscriptionFactory::<T>::new(
-			chain_name,
-			item_type,
-			futures::future::ready(Ok(subscription)),
-		)
-		.await
-		.subscribe()
-		.await
+	/// Create new forwarded subscription.
+	pub fn new_forwarded(
+		desc: StreamDescription,
+		subscription: impl Stream<Item = RpcResult<T>> + Unpin + Send + 'static,
+	) -> Self {
+		Self {
+			desc: desc.clone(),
+			subscription: Box::new(Unwrap::new(desc, subscription)),
+			is_broadcasted: false,
+		}
 	}
 
-	/// Return subscription factory for this subscription.
-	pub fn factory(&self) -> SharedSubscriptionFactory<T> {
-		SharedSubscriptionFactory { subscribers_sender: self.subscribers_sender.clone() }
+	/// Create new broadcasted subscription.
+	pub fn new_broadcasted(
+		desc: StreamDescription,
+		subscription: impl Stream<Item = T> + Unpin + Send + 'static,
+	) -> Self {
+		Self { desc, subscription: Box::new(subscription), is_broadcasted: true }
 	}
 
-	/// Consumes subscription and returns future items stream.
-	pub fn into_stream(self) -> impl futures::Stream<Item = T> {
-		futures::stream::unfold(self, |mut this| async {
-			let item = this.items_receiver.next().await.unwrap_or(None);
-			item.map(|i| (i, this))
-		})
+	/// Get the description of the underlying stream
+	pub fn desc(&self) -> &StreamDescription {
+		&self.desc
 	}
+}
 
-	/// Return next item from the subscription.
-	pub async fn next(&self) -> Result<Option<T>> {
-		Ok(self.items_receiver.recv().await?)
+impl<T> Stream for Subscription<T> {
+	type Item = T;
+
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		Poll::Ready(futures::ready!(Pin::new(&mut self.subscription).poll_next(cx)))
 	}
 }
 
@@ -110,63 +180,16 @@ impl<T: 'static + Clone + DeserializeOwned + Send> Subscription<T> {
 /// message (`Err` or `None`) to all known listeners. Also, when it stops, all
 /// subsequent reads and new subscribers will get the connection error (`ChannelError`).
 async fn background_worker<T: 'static + Clone + DeserializeOwned + Send>(
-	chain_name: String,
-	item_type: String,
-	subscribe: impl Future<Output = Result<UnderlyingSubscription<T>>> + Send + 'static,
-	mut subscribers_receiver: Receiver<Sender<Option<T>>>,
+	mut subscription: Subscription<T>,
+	mut subscribers_receiver: Receiver<Sender<T>>,
 ) {
-	fn log_task_exit(chain_name: &str, item_type: &str, reason: &str) {
+	fn log_task_exit(desc: &StreamDescription, reason: &str) {
 		log::debug!(
 			target: "bridge",
-			"Background task of {} subscription of {} has stopped: {}",
-			item_type,
-			chain_name,
+			"Background task of subscription broadcaster for {} has stopped: {}",
+			desc.get(),
 			reason,
 		);
-	}
-
-	async fn notify_subscribers<T: Clone>(
-		chain_name: &str,
-		item_type: &str,
-		subscribers: &mut Vec<Sender<Option<T>>>,
-		result: Option<Result<T>>,
-	) {
-		let result_to_send = match result {
-			Some(Ok(item)) => Some(item),
-			Some(Err(e)) => {
-				log::debug!(
-					target: "bridge",
-					"{} stream of {} has returned error: {:?}. It may need to be restarted",
-					item_type,
-					chain_name,
-					e,
-				);
-				None
-			},
-			None => {
-				log::debug!(
-					target: "bridge",
-					"{} stream of {} has returned `None`. It may need to be restarted",
-					item_type,
-					chain_name,
-				);
-				None
-			},
-		};
-
-		let mut i = 0;
-		while i < subscribers.len() {
-			let result_to_send = result_to_send.clone();
-			let send_result = subscribers[i].try_send(result_to_send);
-			match send_result {
-				Ok(_) => {
-					i += 1;
-				},
-				Err(_) => {
-					subscribers.swap_remove(i);
-				},
-			}
-		}
 	}
 
 	// wait for first subscriber until actually starting subscription
@@ -175,22 +198,12 @@ async fn background_worker<T: 'static + Clone + DeserializeOwned + Send>(
 		None => {
 			// it means that the last subscriber/factory has been dropped, so we need to
 			// exit too
-			return log_task_exit(&chain_name, &item_type, "client has stopped")
+			return log_task_exit(subscription.desc(), "client has stopped")
 		},
 	};
 
 	// actually subscribe
 	let mut subscribers = vec![subscriber];
-	let mut jsonrpsee_subscription = match subscribe.await {
-		Ok(jsonrpsee_subscription) => jsonrpsee_subscription,
-		Err(e) => {
-			let reason = format!("failed to subscribe: {:?}", e);
-			notify_subscribers(&chain_name, &item_type, &mut subscribers, Some(Err(e))).await;
-
-			// we cant't do anything without underlying subscription, so let's exit
-			return log_task_exit(&chain_name, &item_type, &reason)
-		},
-	};
 
 	// start listening for new items and receivers
 	loop {
@@ -201,19 +214,24 @@ async fn background_worker<T: 'static + Clone + DeserializeOwned + Send>(
 					None => {
 						// it means that the last subscriber/factory has been dropped, so we need to
 						// exit too
-						return log_task_exit(&chain_name, &item_type, "client has stopped")
+						return log_task_exit(subscription.desc(), "client has stopped")
 					},
 				}
 			},
-			item = jsonrpsee_subscription.next().fuse() => {
-				let is_stream_finished = item.is_none();
-				let item = item.map(|r| r.map_err(Into::into));
-				notify_subscribers(&chain_name, &item_type, &mut subscribers, item).await;
-
-				// it means that the underlying client has dropped, so we can't do anything here
-				// and need to stop the task
-				if is_stream_finished {
-					return log_task_exit(&chain_name, &item_type, "stream has finished");
+			maybe_item = subscription.subscription.next().fuse() => {
+				match maybe_item {
+					Some(item) => {
+						// notify subscribers
+						subscribers.retain(|subscriber| {
+							let send_result = subscriber.try_send(item.clone());
+							send_result.is_ok()
+						});
+					}
+					None => {
+						// The underlying client has dropped, so we can't do anything here
+						// and need to stop the task.
+						return log_task_exit(subscription.desc(), "stream has finished");
+					}
 				}
 			},
 		}

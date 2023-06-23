@@ -295,9 +295,10 @@ pub struct DirectReceiveMessagesProofCallBuilder<P, R, I> {
 impl<P, R, I> ReceiveMessagesProofCallBuilder<P> for DirectReceiveMessagesProofCallBuilder<P, R, I>
 where
 	P: SubstrateMessageLane,
-	R: BridgeMessagesConfig<I, InboundRelayer = AccountIdOf<P::SourceChain>>,
+	R: BridgeMessagesConfig<I>,
 	I: 'static,
-	R::BridgedChain: bp_runtime::Chain<Hash = HashOf<P::SourceChain>>,
+	R::BridgedChain:
+		bp_runtime::Chain<AccountId = AccountIdOf<P::SourceChain>, Hash = HashOf<P::SourceChain>>,
 	CallOf<P::TargetChain>: From<BridgeMessagesCall<R, I>> + GetDispatchInfo,
 {
 	fn build_receive_messages_proof_call(
@@ -309,7 +310,7 @@ where
 	) -> CallOf<P::TargetChain> {
 		let call: CallOf<P::TargetChain> = BridgeMessagesCall::<R, I>::receive_messages_proof {
 			relayer_id_at_bridged_chain: relayer_id_at_source,
-			proof: proof.1,
+			proof: Box::new(proof.1),
 			messages_count,
 			dispatch_weight,
 		}
@@ -547,7 +548,7 @@ where
 				FromBridgedChainMessagesProof {
 					bridged_header_hash: Default::default(),
 					storage: Default::default(),
-					lane: Default::default(),
+					lane: LaneId::new(1, 2),
 					nonces_start: 1,
 					nonces_end: messages as u64,
 				},

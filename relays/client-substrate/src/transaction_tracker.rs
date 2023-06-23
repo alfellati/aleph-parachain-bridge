@@ -105,7 +105,7 @@ impl<C: Chain, E: Environment<C>> TransactionTracker<C, E> {
 		let wait_for_invalidation = watch_transaction_status::<_, C, _>(
 			self.environment,
 			self.transaction_hash,
-			self.subscription.into_stream(),
+			self.subscription,
 		);
 		futures::pin_mut!(wait_for_stall_timeout, wait_for_invalidation);
 
@@ -301,7 +301,7 @@ async fn watch_transaction_status<
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::test_chain::TestChain;
+	use crate::{test_chain::TestChain, StreamDescription};
 	use futures::{FutureExt, SinkExt};
 	use sc_transaction_pool_api::TransactionStatus;
 
@@ -328,9 +328,10 @@ mod tests {
 			TestEnvironment(Ok(HeaderId(0, Default::default()))),
 			Duration::from_secs(0),
 			Default::default(),
-			Subscription::new("test".into(), "test".into(), Box::new(receiver))
-				.await
-				.unwrap(),
+			Subscription::new_forwarded(
+				StreamDescription::new("test".into(), "test".into()),
+				receiver,
+			),
 		);
 
 		// we can't do `.now_or_never()` on `do_wait()` call, because `Subscription` has its own
@@ -455,9 +456,10 @@ mod tests {
 			TestEnvironment(Ok(HeaderId(0, Default::default()))),
 			Duration::from_secs(0),
 			Default::default(),
-			Subscription::new("test".into(), "test".into(), Box::new(receiver))
-				.await
-				.unwrap(),
+			Subscription::new_forwarded(
+				StreamDescription::new("test".into(), "test".into()),
+				receiver,
+			),
 		);
 
 		let wait_for_stall_timeout = futures::future::ready(()).shared();

@@ -33,10 +33,12 @@ use bp_messages::{
 		DeliveryPayments, DispatchMessage, DispatchMessageData, FromBridgedChainMessagesProof,
 		MessageDispatch,
 	},
-	ChainWithMessages, DeliveredMessages, InboundLaneData, LaneId, Message, MessageKey,
+	ChainWithMessages, DeliveredMessages, InboundLaneData, LaneId, LaneState, Message, MessageKey,
 	MessageNonce, MessagePayload, OutboundLaneData, UnrewardedRelayer, UnrewardedRelayersState,
 };
-use bp_runtime::{messages::MessageDispatchResult, Chain, ChainId, Size, StorageProofSize};
+use bp_runtime::{
+	messages::MessageDispatchResult, Chain, ChainId, Size, UnverifiedStorageProofParams,
+};
 use codec::{Decode, Encode};
 use frame_support::{
 	parameter_types,
@@ -115,7 +117,7 @@ impl Chain for BridgedChain {
 	type Hash = BridgedHeaderHash;
 	type Hasher = BlakeTwo256;
 	type Header = BridgedChainHeader;
-	type AccountId = AccountId;
+	type AccountId = TestRelayer;
 	type Balance = Balance;
 	type Index = u64;
 	type Signature = sp_runtime::MultiSignature;
@@ -226,7 +228,6 @@ impl pallet_bridge_grandpa::Config for TestRuntime {
 parameter_types! {
 	pub const MaxMessagesToPruneAtOnce: u64 = 10;
 	pub const TestBridgedChainId: bp_runtime::ChainId = *b"test";
-	pub const ActiveOutboundLanes: &'static [LaneId] = &[TEST_LANE_ID, TEST_LANE_ID_2];
 }
 
 /// weights of messages pallet calls we use in tests.
@@ -240,12 +241,9 @@ impl Config for TestRuntime {
 	type BridgedChain = BridgedChain;
 	type BridgedHeaderChain = BridgedChainGrandpa;
 
-	type ActiveOutboundLanes = ActiveOutboundLanes;
-
 	type OutboundPayload = TestPayload;
 
 	type InboundPayload = TestPayload;
-	type InboundRelayer = TestRelayer;
 	type DeliveryPayments = TestDeliveryPayments;
 
 	type DeliveryConfirmationPayments = TestDeliveryConfirmationPayments;
@@ -256,7 +254,7 @@ impl Config for TestRuntime {
 #[cfg(feature = "runtime-benchmarks")]
 impl crate::benchmarking::Config<()> for TestRuntime {
 	fn bench_lane_id() -> LaneId {
-		TEST_LANE_ID
+		test_lane_id()
 	}
 
 	fn prepare_message_proof(
@@ -267,7 +265,7 @@ impl crate::benchmarking::Config<()> for TestRuntime {
 		let dispatch_weight =
 			REGULAR_PAYLOAD.declared_weight * params.message_nonces.checked_len().unwrap_or(0);
 		(
-			prepare_messages_proof(
+			*prepare_messages_proof(
 				params.message_nonces.into_iter().map(|n| message(n, REGULAR_PAYLOAD)).collect(),
 				params.outbound_lane_data,
 			),
@@ -307,13 +305,19 @@ pub const TEST_RELAYER_B: AccountId = 101;
 pub const TEST_RELAYER_C: AccountId = 102;
 
 /// Lane that we're using in tests.
-pub const TEST_LANE_ID: LaneId = LaneId([0, 0, 0, 1]);
+pub fn test_lane_id() -> LaneId {
+	LaneId::new(1, 2)
+}
 
-/// Secondary lane that we're using in tests.
-pub const TEST_LANE_ID_2: LaneId = LaneId([0, 0, 0, 2]);
+/// Lane that is completely unknown to our runtime.
+pub fn unknown_lane_id() -> LaneId {
+	LaneId::new(1, 3)
+}
 
-/// Inactive outbound lane.
-pub const TEST_LANE_ID_3: LaneId = LaneId([0, 0, 0, 3]);
+/// Lane that is registered, but it is closed.
+pub fn closed_lane_id() -> LaneId {
+	LaneId::new(1, 4)
+}
 
 /// Regular message payload.
 pub const REGULAR_PAYLOAD: TestPayload = message_payload(0, 50);
@@ -405,7 +409,7 @@ impl MessageDispatch for TestMessageDispatch {
 
 /// Return test lane message with given nonce and payload.
 pub fn message(nonce: MessageNonce, payload: TestPayload) -> Message {
-	Message { key: MessageKey { lane_id: TEST_LANE_ID, nonce }, payload: payload.encode() }
+	Message { key: MessageKey { lane_id: test_lane_id(), nonce }, payload: payload.encode() }
 }
 
 /// Return valid outbound message data, constructed from given payload.
@@ -449,7 +453,7 @@ pub fn unrewarded_relayer(
 
 /// Returns unrewarded relayers state at given lane.
 pub fn inbound_unrewarded_relayers_state(lane: bp_messages::LaneId) -> UnrewardedRelayersState {
-	let inbound_lane_data = crate::InboundLanes::<TestRuntime, ()>::get(lane).0;
+	let inbound_lane_data = crate::InboundLanes::<TestRuntime, ()>::get(lane).unwrap().0;
 	UnrewardedRelayersState::from(&inbound_lane_data)
 }
 
@@ -464,7 +468,19 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 
 /// Run pallet test.
 pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
-	new_test_ext().execute_with(test)
+	new_test_ext().execute_with(|| {
+		crate::InboundLanes::<TestRuntime, ()>::insert(test_lane_id(), InboundLaneData::opened());
+		crate::OutboundLanes::<TestRuntime, ()>::insert(test_lane_id(), OutboundLaneData::opened());
+		crate::InboundLanes::<TestRuntime, ()>::insert(
+			closed_lane_id(),
+			InboundLaneData { state: LaneState::Closed, ..Default::default() },
+		);
+		crate::OutboundLanes::<TestRuntime, ()>::insert(
+			closed_lane_id(),
+			OutboundLaneData { state: LaneState::Closed, ..Default::default() },
+		);
+		test()
+	})
 }
 
 /// Prepare valid storage proof for given messages and insert appropriate header to the
@@ -475,16 +491,16 @@ pub fn run_test<T>(test: impl FnOnce() -> T) -> T {
 pub fn prepare_messages_proof(
 	messages: Vec<Message>,
 	outbound_lane_data: Option<OutboundLaneData>,
-) -> FromBridgedChainMessagesProof<BridgedHeaderHash> {
+) -> Box<FromBridgedChainMessagesProof<BridgedHeaderHash>> {
 	// first - let's generate storage proof
 	let lane = messages.first().unwrap().key.lane_id;
 	let nonces_start = messages.first().unwrap().key.nonce;
 	let nonces_end = messages.last().unwrap().key.nonce;
 	let (storage_root, storage) = prepare_messages_storage_proof::<BridgedChain, ThisChain>(
-		TEST_LANE_ID,
+		lane,
 		nonces_start..=nonces_end,
 		outbound_lane_data,
-		StorageProofSize::Minimal(0),
+		UnverifiedStorageProofParams::default(),
 		|nonce| messages[(nonce - nonces_start) as usize].payload.clone(),
 		encode_all_messages,
 		encode_lane_data,
@@ -499,13 +515,13 @@ pub fn prepare_messages_proof(
 		StoredHeaderData { number: 0, state_root: storage_root },
 	);
 
-	FromBridgedChainMessagesProof::<BridgedHeaderHash> {
+	Box::new(FromBridgedChainMessagesProof::<BridgedHeaderHash> {
 		bridged_header_hash,
 		storage,
 		lane,
 		nonces_start,
 		nonces_end,
-	}
+	})
 }
 
 /// Prepare valid storage proof for given messages and insert appropriate header to the
@@ -518,10 +534,12 @@ pub fn prepare_messages_delivery_proof(
 	inbound_lane_data: InboundLaneData<AccountId>,
 ) -> FromBridgedChainMessagesDeliveryProof<BridgedHeaderHash> {
 	// first - let's generate storage proof
-	let (storage_root, storage_proof) = prepare_message_delivery_storage_proof::<
-		BridgedChain,
-		ThisChain,
-	>(lane, inbound_lane_data, StorageProofSize::Minimal(0));
+	let (storage_root, storage_proof) =
+		prepare_message_delivery_storage_proof::<BridgedChain, ThisChain>(
+			lane,
+			inbound_lane_data,
+			UnverifiedStorageProofParams::default(),
+		);
 
 	// let's now insert bridged chain header into the storage
 	let bridged_header_hash = Default::default();

@@ -16,23 +16,18 @@
 
 //! Helpers for generating message storage proofs, that are used by tests and by benchmarks.
 
-// TODO: remove me in https://github.com/paritytech/parity-bridges-common/issues/1666
-#![allow(dead_code)]
-
 use bp_messages::{
 	storage_keys, ChainWithMessages, InboundLaneData, LaneId, MessageKey, MessageNonce,
 	MessagePayload, OutboundLaneData,
 };
 use bp_runtime::{
-	grow_trie_leaf_value, record_all_trie_keys, AccountIdOf, Chain, HashOf, HasherOf,
-	RangeInclusiveExt, StorageProofSize, UntrustedVecDb,
+	grow_storage_value, AccountIdOf, Chain, HashOf, HasherOf, RangeInclusiveExt,
+	UnverifiedStorageProof, UnverifiedStorageProofParams,
 };
 use codec::Encode;
 use frame_support::StateVersion;
 use sp_std::{ops::RangeInclusive, prelude::*};
-use sp_trie::{
-	LayoutV0, LayoutV1, MemoryDB, StorageProof, TrieConfiguration, TrieDBMutBuilder, TrieMut,
-};
+use sp_trie::{LayoutV0, LayoutV1, MemoryDB, TrieConfiguration, TrieDBMutBuilder, TrieMut};
 
 /// Dummy message generation function.
 pub fn generate_dummy_message(_: MessageNonce) -> MessagePayload {
@@ -55,13 +50,13 @@ pub fn prepare_messages_storage_proof<BridgedChain: Chain, ThisChain: ChainWithM
 	lane: LaneId,
 	message_nonces: RangeInclusive<MessageNonce>,
 	outbound_lane_data: Option<OutboundLaneData>,
-	size: StorageProofSize,
+	proof_params: UnverifiedStorageProofParams,
 	generate_message: impl Fn(MessageNonce) -> MessagePayload,
 	encode_message: impl Fn(MessageNonce, &MessagePayload) -> Option<Vec<u8>>,
 	encode_outbound_lane_data: impl Fn(&OutboundLaneData) -> Vec<u8>,
 	add_duplicate_key: bool,
 	add_unused_key: bool,
-) -> (HashOf<BridgedChain>, UntrustedVecDb)
+) -> (HashOf<BridgedChain>, UnverifiedStorageProof)
 where
 	HashOf<BridgedChain>: Copy + Default,
 {
@@ -74,7 +69,7 @@ where
 			lane,
 			message_nonces,
 			outbound_lane_data,
-			size,
+			proof_params,
 			generate_message,
 			encode_message,
 			encode_outbound_lane_data,
@@ -89,7 +84,7 @@ where
 			lane,
 			message_nonces,
 			outbound_lane_data,
-			size,
+			proof_params,
 			generate_message,
 			encode_message,
 			encode_outbound_lane_data,
@@ -103,8 +98,8 @@ where
 pub fn prepare_message_delivery_storage_proof<BridgedChain: Chain, ThisChain: ChainWithMessages>(
 	lane: LaneId,
 	inbound_lane_data: InboundLaneData<AccountIdOf<ThisChain>>,
-	size: StorageProofSize,
-) -> (HashOf<BridgedChain>, UntrustedVecDb)
+	proof_params: UnverifiedStorageProofParams,
+) -> (HashOf<BridgedChain>, UnverifiedStorageProof)
 where
 	HashOf<BridgedChain>: Copy + Default,
 {
@@ -113,12 +108,12 @@ where
 			BridgedChain,
 			ThisChain,
 			LayoutV0<HasherOf<BridgedChain>>,
-		>(lane, inbound_lane_data, size),
+		>(lane, inbound_lane_data, proof_params),
 		StateVersion::V1 => do_prepare_message_delivery_storage_proof::<
 			BridgedChain,
 			ThisChain,
 			LayoutV1<HasherOf<BridgedChain>>,
-		>(lane, inbound_lane_data, size),
+		>(lane, inbound_lane_data, proof_params),
 	}
 }
 
@@ -130,13 +125,13 @@ fn do_prepare_messages_storage_proof<BridgedChain: Chain, ThisChain: ChainWithMe
 	lane: LaneId,
 	message_nonces: RangeInclusive<MessageNonce>,
 	outbound_lane_data: Option<OutboundLaneData>,
-	size: StorageProofSize,
+	proof_params: UnverifiedStorageProofParams,
 	generate_message: impl Fn(MessageNonce) -> MessagePayload,
 	encode_message: impl Fn(MessageNonce, &MessagePayload) -> Option<Vec<u8>>,
 	encode_outbound_lane_data: impl Fn(&OutboundLaneData) -> Vec<u8>,
 	add_duplicate_key: bool,
 	add_unused_key: bool,
-) -> (HashOf<BridgedChain>, UntrustedVecDb)
+) -> (HashOf<BridgedChain>, UnverifiedStorageProof)
 where
 	L: TrieConfiguration<Hash = HasherOf<BridgedChain>>,
 	HashOf<BridgedChain>: Copy + Default,
@@ -155,7 +150,7 @@ where
 			let message_payload = match encode_message(nonce, &generate_message(nonce)) {
 				Some(message_payload) =>
 					if i == 0 {
-						grow_trie_leaf_value(message_payload, size)
+						grow_storage_value(message_payload, &proof_params)
 					} else {
 						message_payload
 					},
@@ -202,15 +197,10 @@ where
 	}
 
 	// generate storage proof to be delivered to This chain
-	let read_proof = record_all_trie_keys::<L, _>(&mdb, &root)
-		.map_err(|_| "record_all_trie_keys has failed")
-		.expect("record_all_trie_keys should not fail in benchmarks");
-	let storage = UntrustedVecDb::try_new::<HasherOf<BridgedChain>>(
-		StorageProof::new(read_proof),
-		root,
-		storage_keys,
-	)
-	.unwrap();
+	let storage =
+		UnverifiedStorageProof::try_from_db::<HasherOf<BridgedChain>, _>(&mdb, root, storage_keys)
+			.expect("UnverifiedStorageProof::try_from_db() should not fail in benchmarks");
+
 	(root, storage)
 }
 
@@ -220,8 +210,8 @@ where
 fn do_prepare_message_delivery_storage_proof<BridgedChain: Chain, ThisChain: ChainWithMessages, L>(
 	lane: LaneId,
 	inbound_lane_data: InboundLaneData<AccountIdOf<ThisChain>>,
-	size: StorageProofSize,
-) -> (HashOf<BridgedChain>, UntrustedVecDb)
+	proof_params: UnverifiedStorageProofParams,
+) -> (HashOf<BridgedChain>, UnverifiedStorageProof)
 where
 	L: TrieConfiguration<Hash = HasherOf<BridgedChain>>,
 	HashOf<BridgedChain>: Copy + Default,
@@ -233,21 +223,18 @@ where
 	let mut mdb = MemoryDB::default();
 	{
 		let mut trie = TrieDBMutBuilder::<L>::new(&mut mdb, &mut root).build();
-		let inbound_lane_data = grow_trie_leaf_value(inbound_lane_data.encode(), size);
+		let inbound_lane_data = grow_storage_value(inbound_lane_data.encode(), &proof_params);
 		trie.insert(&storage_key, &inbound_lane_data)
 			.map_err(|_| "TrieMut::insert has failed")
 			.expect("TrieMut::insert should not fail in benchmarks");
 	}
 
 	// generate storage proof to be delivered to This chain
-	let read_proof = record_all_trie_keys::<L, _>(&mdb, &root)
-		.map_err(|_| "record_all_trie_keys has failed")
-		.expect("record_all_trie_keys should not fail in benchmarks");
-	let storage = UntrustedVecDb::try_new::<HasherOf<BridgedChain>>(
-		StorageProof::new(read_proof),
+	let storage = UnverifiedStorageProof::try_from_db::<HasherOf<BridgedChain>, _>(
+		&mdb,
 		root,
 		vec![storage_key],
 	)
-	.unwrap();
+	.expect("UnverifiedStorageProof::try_from_db() should not fail in benchmarks");
 	(root, storage)
 }

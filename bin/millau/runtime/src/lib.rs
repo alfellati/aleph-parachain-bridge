@@ -44,7 +44,7 @@ use pallet_transaction_payment::{FeeDetails, Multiplier, RuntimeDispatchInfo};
 use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_beefy::{crypto::AuthorityId as BeefyId, mmr::MmrLeafVersion, ValidatorSet};
-use sp_core::OpaqueMetadata;
+use sp_core::{ConstBool, OpaqueMetadata};
 use sp_runtime::{
 	create_runtime_str, generic, impl_opaque_keys,
 	traits::{Block as BlockT, IdentityLookup, Keccak256, NumberFor, OpaqueKeys},
@@ -229,6 +229,7 @@ impl pallet_aura::Config for Runtime {
 	type AuthorityId = AuraId;
 	type MaxAuthorities = ConstU32<10>;
 	type DisabledValidators = ();
+	type AllowMultipleBlocksPerSlot = ConstBool<false>;
 }
 
 impl pallet_beefy::Config for Runtime {
@@ -428,8 +429,6 @@ impl pallet_shift_session_manager::Config for Runtime {}
 parameter_types! {
 	pub const MaxMessagesToPruneAtOnce: bp_messages::MessageNonce = 8;
 	pub const RootAccountForPayments: Option<AccountId> = None;
-	pub RialtoActiveOutboundLanes: &'static [bp_messages::LaneId] = &[rialto_messages::XCM_LANE];
-	pub RialtoParachainActiveOutboundLanes: &'static [bp_messages::LaneId] = &[rialto_parachain_messages::XCM_LANE];
 }
 
 /// Instance of the messages pallet used to relay messages to/from Rialto chain.
@@ -443,14 +442,10 @@ impl pallet_bridge_messages::Config<WithRialtoMessagesInstance> for Runtime {
 	type BridgedChain = bp_rialto::Rialto;
 	type BridgedHeaderChain = BridgeRialtoGrandpa;
 
-	type ActiveOutboundLanes = RialtoActiveOutboundLanes;
+	type OutboundPayload = bridge_runtime_common::messages_xcm_extension::XcmAsPlainPayload;
+	type InboundPayload = bridge_runtime_common::messages_xcm_extension::XcmAsPlainPayload;
 
-	type OutboundPayload = crate::rialto_messages::ToRialtoMessagePayload;
-
-	type InboundPayload = crate::rialto_messages::FromRialtoMessagePayload;
-	type InboundRelayer = bp_rialto::AccountId;
 	type DeliveryPayments = ();
-
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		Runtime,
 		WithRialtoMessagesInstance,
@@ -475,14 +470,10 @@ impl pallet_bridge_messages::Config<WithRialtoParachainMessagesInstance> for Run
 		bp_rialto_parachain::RialtoParachain,
 	>;
 
-	type ActiveOutboundLanes = RialtoParachainActiveOutboundLanes;
+	type OutboundPayload = bridge_runtime_common::messages_xcm_extension::XcmAsPlainPayload;
+	type InboundPayload = bridge_runtime_common::messages_xcm_extension::XcmAsPlainPayload;
 
-	type OutboundPayload = crate::rialto_parachain_messages::ToRialtoParachainMessagePayload;
-
-	type InboundPayload = crate::rialto_parachain_messages::FromRialtoParachainMessagePayload;
-	type InboundRelayer = bp_rialto_parachain::AccountId;
 	type DeliveryPayments = ();
-
 	type DeliveryConfirmationPayments = pallet_bridge_relayers::DeliveryConfirmationPaymentsAdapter<
 		Runtime,
 		WithRialtoParachainMessagesInstance,
@@ -493,7 +484,6 @@ impl pallet_bridge_messages::Config<WithRialtoParachainMessagesInstance> for Run
 }
 
 parameter_types! {
-	pub const RialtoParachainMessagesLane: bp_messages::LaneId = rialto_parachain_messages::XCM_LANE;
 	pub const RialtoParasPalletName: &'static str = bp_rialto::PARAS_PALLET_NAME;
 	pub const WestendParasPalletName: &'static str = bp_westend::PARAS_PALLET_NAME;
 	pub const MaxRialtoParaHeadDataSize: u32 = bp_rialto::MAX_NESTED_PARACHAIN_HEAD_DATA_SIZE;
@@ -591,11 +581,11 @@ generate_bridge_reject_obsolete_headers_and_messages! {
 
 bp_runtime::generate_static_str_provider!(BridgeRefundRialtoPara2000Lane0Msgs);
 /// Signed extension that refunds relayers that are delivering messages from the Rialto parachain.
-pub type PriorityBoostPerMessage = ConstU64<348_340_176>;
+pub type PriorityBoostPerMessage = ConstU64<351_343_108>;
 pub type BridgeRefundRialtoParachainMessages = RefundBridgedParachainMessages<
 	Runtime,
 	RefundableParachain<WithRialtoParachainsInstance, bp_rialto_parachain::RialtoParachain>,
-	RefundableMessagesLane<WithRialtoParachainMessagesInstance, RialtoParachainMessagesLane>,
+	RefundableMessagesLane<Runtime, WithRialtoParachainMessagesInstance>,
 	ActualFeeRefund<Runtime>,
 	PriorityBoostPerMessage,
 	StrBridgeRefundRialtoPara2000Lane0Msgs,
@@ -1015,8 +1005,6 @@ impl_runtime_apis! {
 				Pallet as RelayersBench,
 				Config as RelayersConfig,
 			};
-			use rialto_messages::WithRialtoMessageBridge;
-			use rialto_parachain_messages::WithRialtoParachainMessageBridge;
 
 			impl MessagesConfig<WithRialtoParachainMessagesInstance> for Runtime {
 				fn prepare_message_proof(
@@ -1025,7 +1013,7 @@ impl_runtime_apis! {
 					prepare_message_proof_from_parachain::<
 						Runtime,
 						WithRialtoParachainsInstance,
-						WithRialtoParachainMessageBridge,
+						WithRialtoParachainMessagesInstance,
 					>(params, xcm::v3::Junctions::Here)
 				}
 
@@ -1035,7 +1023,7 @@ impl_runtime_apis! {
 					prepare_message_delivery_proof_from_parachain::<
 						Runtime,
 						WithRialtoParachainsInstance,
-						WithRialtoParachainMessageBridge,
+						WithRialtoParachainMessagesInstance,
 					>(params)
 				}
 
@@ -1056,7 +1044,7 @@ impl_runtime_apis! {
 					prepare_message_proof_from_grandpa_chain::<
 						Runtime,
 						RialtoGrandpaInstance,
-						WithRialtoMessageBridge,
+						WithRialtoMessagesInstance,
 					>(params, xcm::v3::Junctions::Here)
 				}
 
@@ -1066,7 +1054,7 @@ impl_runtime_apis! {
 					prepare_message_delivery_proof_from_grandpa_chain::<
 						Runtime,
 						RialtoGrandpaInstance,
-						WithRialtoMessageBridge,
+						WithRialtoMessagesInstance,
 					>(params)
 				}
 
@@ -1089,7 +1077,7 @@ impl_runtime_apis! {
 				fn prepare_parachain_heads_proof(
 					parachains: &[bp_polkadot_core::parachains::ParaId],
 					parachain_head_size: u32,
-					proof_size: bp_runtime::StorageProofSize,
+					proof_params: bp_runtime::UnverifiedStorageProofParams,
 				) -> (
 					pallet_bridge_parachains::RelayBlockNumber,
 					pallet_bridge_parachains::RelayBlockHash,
@@ -1102,7 +1090,7 @@ impl_runtime_apis! {
 					>(
 						parachains,
 						parachain_head_size,
-						proof_size,
+						proof_params,
 					)
 				}
 			}
