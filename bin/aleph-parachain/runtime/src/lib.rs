@@ -516,9 +516,6 @@ construct_runtime!(
 		// Handy utilities
 		Utility: pallet_utility = 50,
 		Scheduler: pallet_scheduler = 51,
-		// Multisig: pallet_multisig = 52,
-		// Preimage: pallet_preimage = 53,
-		// Proxy: pallet_proxy = 54,
 	}
 );
 
