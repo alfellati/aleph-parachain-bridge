@@ -1,3 +1,4 @@
+// Copyright 2023 Cardinal Cryptography
 // Copyright 2019-2021 Parity Technologies (UK) Ltd.
 // This file is part of Parity Bridges Common.
 
