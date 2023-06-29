@@ -1,0 +1,9 @@
+Description: Test: parachain registers and produces blocks
+Network: ../../local-relay-network/config.toml
+Creds: config
+
+rococo-validator-0: is up
+aleph-collator-0: is up
+aleph-collator-1: is up
+rococo-validator-0: parachain 2106 is registered within 200 seconds
+rococo-validator-0: parachain 2106 block height is at least 10 within 200 seconds
