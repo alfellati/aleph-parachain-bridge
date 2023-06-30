@@ -1,11 +1,11 @@
 use aleph_parachain_runtime::{
-	AccountId, AuraId, RuntimeGenesisConfig, Signature, SudoConfig, EXISTENTIAL_DEPOSIT,
+	AccountId, AuraId, RuntimeGenesisConfig, Signature, EXISTENTIAL_DEPOSIT,
 };
 use cumulus_primitives_core::ParaId;
 use sc_chain_spec::{ChainSpecExtension, ChainSpecGroup};
 use sc_service::ChainType;
 use serde::{Deserialize, Serialize};
-use sp_core::{crypto::Ss58Codec, sr25519, Pair, Public};
+use sp_core::{sr25519, Pair, Public};
 use sp_runtime::traits::{IdentifyAccount, Verify};
 
 /// Specialized `ChainSpec` for the normal parachain runtime.
@@ -219,10 +219,6 @@ fn testnet_genesis(
 			safe_xcm_version: Some(SAFE_XCM_VERSION),
 		},
 		transaction_payment: Default::default(),
-		sudo: SudoConfig {
-			key: Some(
-				AccountId::from_string("5GCLLbbFWkXkwo2byh8k5cpud458roP6NzUk9gSkEr8uShEA").unwrap(),
-			),
-		},
+		sudo: SudoConfig { key: Some(get_account_id_from_seed::<sr25519::Public>("Alice")) },
 	}
 }
