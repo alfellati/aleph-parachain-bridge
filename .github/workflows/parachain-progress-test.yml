@@ -1,0 +1,39 @@
+name: Test Parachain Progress
+
+on:
+  pull_request:
+    branches:
+    - master
+  push:
+    branches:
+    - master
+
+jobs:
+  test-parachain-progress:
+    runs-on: [self-hosted, Linux, X64, large]
+    env:
+      RUST_BACKTRACE: full
+      RUSTC_WRAPPER: sccache
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Install Protoc
+      uses: arduino/setup-protoc@v1
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install Rust Toolchain
+      uses: Cardinal-Cryptography/github-actions/install-rust-toolchain@v1
+
+    - name: Build Code
+      run: cargo build -p aleph-parachain-node --release
+
+    - name: Setup zombienet
+      run: source scripts/zombienet_setup.sh
+
+    - name: Update github path
+      run: echo "$GITHUB_WORKSPACE/local-relay-network" >> $GITHUB_PATH
+
+    - name: Run parachain progress test
+      run: zombienet-linux-x64 test --provider native tests/zombienet/parachain_progress.zndsl
