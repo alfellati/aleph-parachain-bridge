@@ -1,5 +1,5 @@
-use codec::{Decode, Encode, Input, MaxEncodedLen};
-use sp_runtime::{traits::Header as HeaderT, EncodedJustification, RuntimeAppPublic, RuntimeDebug};
+use codec::{Decode, Encode, Input};
+use sp_runtime::{traits::Header as HeaderT, RuntimeAppPublic, RuntimeDebug};
 
 use crate::{AuthoritySet, AuthoritySignature};
 
@@ -30,7 +30,7 @@ pub fn decode_versioned_aleph_justification<I: Input>(
 	input: &mut I,
 ) -> Result<AlephJustification, Error> {
 	let version = Version::decode(input).map_err(|_| Error::JustificationNotDecodable)?;
-	let num_bytes = u16::decode(input).map_err(|_| Error::JustificationNotDecodable)?;
+	let _num_bytes = u16::decode(input).map_err(|_| Error::JustificationNotDecodable)?;
 	match version {
 		Version(3) =>
 			Ok(AlephJustification::decode(input).map_err(|_| Error::JustificationNotDecodable)?),
@@ -85,10 +85,9 @@ pub fn verify_justification<Header: HeaderT>(
 ) -> Result<(), Error> {
 	match justification.justification() {
 		AlephJustification::CommitteeMultisignature(signature_set) => {
-			let mut signatures = signature_set.0.iter();
 			let mut signature_count = 0;
 
-			while let Some((index, signature)) = signatures.next() {
+			for (index, signature) in signature_set.0.iter() {
 				let authority = authority_set.get(index.0).ok_or(Error::InvalidIndex)?;
 
 				if authority.verify(&justification.header().hash().encode(), &signature.0) {
@@ -97,7 +96,7 @@ pub fn verify_justification<Header: HeaderT>(
 			}
 
 			if signature_count < 2 * authority_set.len() / 3 + 1 {
-			 	return Err(Error::NotEnoughCorrectSignatures)
+				return Err(Error::NotEnoughCorrectSignatures)
 			}
 
 			Ok(())
@@ -113,10 +112,8 @@ mod tests {
 	use crate::AuthorityId;
 	use bp_test_utils::test_header;
 	use hex::FromHex;
-	use serde::Deserialize;
 	use sp_application_crypto::Pair;
-	use sp_core::H256;
-	use sp_runtime::{testing::Header, traits::BlakeTwo256, Digest, DigestItem, ConsensusEngineId};
+	use sp_runtime::{testing::Header, ConsensusEngineId, Digest, DigestItem};
 
 	fn generate_seeds(size: usize) -> Vec<[u8; 32]> {
 		let mut seed = [0u8; 32];
@@ -174,16 +171,6 @@ mod tests {
 		assert!(verify_justification(&authority_set, &justification).is_ok());
 	}
 
-	/*#[test]
-	fn rejects_emergency_justification() {
-		use crate::aleph_justification::tests::generate_emergency_justification;
-
-		let justification = generate_emergency_justification();
-		let authority_set = justification.authority_set();
-
-		assert!(verify_justification(&authority_set, &justification).is_err());
-	}*/
-
 	#[test]
 	fn rejects_justification_with_too_little_signatures() {
 		let justification = default_test_justification();
@@ -191,19 +178,6 @@ mod tests {
 
 		assert!(verify_justification(&authority_set, &justification).is_err());
 	}
-
-	/*#[test]
-	fn rejects_duplicate_signatures() {
-		use crate::aleph_justification::tests::generate_valid_justification;
-
-		let mut justification = generate_valid_justification();
-		let authority_set = justification.authority_set();
-
-		let signature = justification.justification().signature_set().0[0].clone();
-		justification.justification_mut().signature_set_mut().0.push(signature);
-
-		assert!(verify_justification(&authority_set, &justification).is_err());
-	}*/
 
 	#[test]
 	fn incorrect_indices() {
