@@ -91,15 +91,13 @@ pub fn verify_justification<Header: HeaderT>(
 			while let Some((index, signature)) = signatures.next() {
 				let authority = authority_set.get(index.0).ok_or(Error::InvalidIndex)?;
 
-				if authority.verify(&justification.header().encode(), &signature.0) {
+				if authority.verify(&justification.header().hash().encode(), &signature.0) {
 					signature_count += 1;
 				}
 			}
 
 			if signature_count < 2 * authority_set.len() / 3 + 1 {
 			 	return Err(Error::NotEnoughCorrectSignatures)
-			} else {
-				panic!("{:?}", signature_count);
 			}
 
 			Ok(())
@@ -153,7 +151,7 @@ mod tests {
 		let mut hashmap = HashMap::new();
 		for (index, authority) in generate_seeds(4).iter().enumerate() {
 			let aleph_authority = pair_from_seed(authority);
-			let signature = aleph_authority.sign(&header.encode());
+			let signature = aleph_authority.sign(&header.hash().encode());
 			hashmap.insert(NodeIndex(index), Signature(signature));
 		}
 
@@ -221,24 +219,13 @@ mod tests {
 
 	const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 
-	const DEVNET_JUSTIFICATION: &str = "0300c6000010016e444638b5437a4cd3efc0f926e8738f02ce837ff0cd48d4caec31dda0c295ea15613bfddb91823e77c2303ba6b1b7dd1789c9698144bfb87878c52e49aa300e0001436254d359bf6c8342cdc95141d07a06b53d2355ac734175c332c5fe767d3b3b752d3010ca44d6b9a11cab1ca723d2ffdcb706dceeda0cfb5db2475f3c27b80c0115cf4588ed5862cfe5c6596f678f7811272ecb0eb96d9349e6443d4b2449f46f725869b2c0af17c19854737839c357282d5dbbe8324de00c85a66d3005904602";
-	/*const DEVNET_HEADER: Header = Header::new(
-			51730103,
-			BlakeTwo256::decode(FromHex::from_hex("78d422f744c6207f40ceb5504021803a7551c03e74b3e2c847df2a052b565942")),
-			BlakeTwo256::decode(FromHex::from_hex("ffa33bb51a943ebd44426569cbfc901ca1e37a8f06652cf5cff20473cd980690")),
-			BlakeTwo256::decode(FromHex::from_hex("de7ce2d09b3d3b6decfdf9a1e8b0582d413642d8edd4d326a5677f6222027028")),
-			Digest {
-				logs: vec![
-				DigestItem::PreRuntime(AURA_ENGINE_ID, Vec::decode(FromHex::from_hex("b1b8a26400000000").unwrap())),
-				DigestItem::Seal(AURA_ENGINE_ID, Vec::decode(FromHex::from_hex("220b93bbbb5af5352c2da639536b2c0ac33e6cfe4d765846f33838344e24fb54373092c0b16671414d431828ddb771552e17a89a67928e88e5ac343a0021548e").unwrap()))
-			]}
-		);
+	const DEVNET_JUSTIFICATION: &str = "0300c60000100182e110ef61d591076351794f8d0927ddf0ee3aa4fcf0de6d3b4a07c9c0ce836a7d2efb1e7aef1ff645a1337a2b3eebccf80c78feba49e1f11997c636a6999f0d0001ecb430ade18767790b85280a134ae73dce133ee614f167c3f88f9fb3cf6a3c583f8e604410f3750bb86292167e86f06fd687fc1eb840c47cc27379a8e752d30e017b7e8504257b9e55dfb5f06a9e0a22d1b94aa8da0f202fc685ef6089d8a9286d011e687c8db69e7162b4b07ed55b35f837f22f93aacdb4e54dafe2d2dbde8509";
 	const DEVNET_AUTHORITIES: [&str; 4] = [
-		"8960ce7da9896de4204a6b565c357bd62743126d65b16b298b9e31b7d3045cd7",
-		"976306673bd098fca2238a193b506d6abc7340849923a9967c4403e48fb43f33",
-		"0124b9b4cc0f09a561555a06e5a8888f84f5778032a1c9a7c876d8ac1816ef3d",
-		"fec85f3a09540b62f545226e2c8bbbdc1eba8df10b8b9f7b8c9937d86e0a4a2a",
-	];*/
+		"bc3faef89f7b46c69088f4b3be1545a2dbb132a22bbfa9778625a924b0c38320",
+		"7e2dc59e0fcf3ece8a37a8672952fbccb4b73403069901fb5804ac2e36a90d5a",
+		"c2e071ddd5c993e3498ccd5e38a5a77b4d94848d6b066bc9391ac4e3be84ce5c",
+		"7e0a8df85cf67e1e83eacb7690245872a571ce5d37bd5cb761ec98da4f3238d4",
+	];
 
 	// Block 51730103
 	const MAINNET_JUSTIFICATION: &str = "03009002003801752af5d2d57c25657cf083014c65eb39d18a4eeba5ca4a1ffeee378df14298ef449f9b076a3f5918de1e774410a52fb38f0fd5e70ba44dfea1453647388b94060112cb082077986f0e79bb12a69d9fa483f99f8a552e5124623a4e8a14ff324f9ba33d9b0cc11d9c773c8ee6d830a334c012f3c9b1036f44ba08f0fe5e7b1e540f01c5906221eec48d57d992573cebc1e6861f1e7e572d1d0d47328dd417361cb53d71864407246a6c0f575e67471e6692a3066d1a5787817645b9f1e5dc57fb2a0d000158b8d87262541a2f73d6c311657f74234203a3650ac442acf99bf4e1600486bb1e5849c6ac204c58c1120189c8e3c76918c564ec2a0468365751f15591580f0d0114e28c22ff3cee483567ae2fc0e4aab6386e5cba24eb3c2866b0e2245ad1a5bb70a0714e807e0b903ef58463792595a6d6a4e5fe58c3c0ad118eb031a32c7b060001c10be8f8665c804552dd3af729724422841fb47f8dfbb5487935ca86bdee3489bc03ea4c47c022462c19bb668c913392192e27f0bcc8538edf61d076c772b80600019ebf0579cd074ce2385326ad8dfadb720e14365c9cb588d56776ce9fbf73d3a4e30671fec68c6a1cee052d19ef5e018e53a44222063379f754e8aa80ea54cd05012f4b3f8a0845134fa599aea859a9c09c020712f31bf24a6e98587bf44d89f3d854df2a96c6af8ddc81885dd7c0d26f64a69f9b0da418025a6b42d955d97dcd0301e4094b019782509277dbe7969b1cb9ae22f65b7c33c32542b22ffe0d179a7661ffa3743747cf19870a1491406adb8438d11c70e5732655a340344a1c0686d20701f42cb05c7793f8055bb8c0d8e872426f2293a2cc54898548a0d71b2906caa2c4c5d5af502331c9b7c5d7e5f587414a6b5a00f92cff843d44eebb81d84a592e0400";
@@ -261,6 +248,7 @@ mod tests {
 
 	fn raw_authorities_into_authority_set(raw_authorities: &[&str]) -> AuthoritySet {
 		let mut authorities = Vec::new();
+		println!("raw_authorities: {:?}", raw_authorities);
 		for raw_authority in raw_authorities {
 			authorities.push(decode_from_hex(raw_authority));
 		}
@@ -279,15 +267,27 @@ mod tests {
 		assert!(decode_versioned_aleph_justification(&mut encoded_justification.as_slice()).is_ok());
 	}
 
-	/*#[test]
+	#[test]
 	fn devnet_justification_is_valid() {
 		let authority_set = raw_authorities_into_authority_set(&DEVNET_AUTHORITIES);
 		let encoded_justification: Vec<u8> = FromHex::from_hex(DEVNET_JUSTIFICATION).unwrap();
 		let justification =
 			decode_versioned_aleph_justification(&mut encoded_justification.as_slice()).unwrap();
+		let header = Header::new(
+			49,
+			decode_from_hex("bf45a153b83c7981aede86e12cd072a1fde518dda899b7f9a5b222eaa432b9a0"),
+			decode_from_hex("96ea6b88d102208f8072513b6015ff32a4070de19c5988e040d7710e5919ce64"),
+			decode_from_hex("5bc9cb5341a1ae9a282208f19d68333f18c29b7096eecdf4983b78de642266d7"), 
+			Digest {
+				logs: vec![
+				DigestItem::PreRuntime(AURA_ENGINE_ID, FromHex::from_hex("beeda36400000000").unwrap()), 
+				DigestItem::Seal(AURA_ENGINE_ID, FromHex::from_hex("746d6432f2d81c9710b70bcefda2c6e584ab67f09d59c17e69fce3d07c74d80589032511258587f1107eb3ac90b6166b1ecac7d558739a07a70e864aef1c8488").unwrap())
+			]}
+		);
 
-		assert!(verify_justification(&authority_set, &justification).is_ok());
-	}*/
+		let full_justification = AlephFullJustification { header, justification };
+		assert!(verify_justification(&authority_set, &full_justification).is_ok());
+	}
 
 	#[test]
 	fn mainnet_justification_is_valid() {
@@ -306,10 +306,8 @@ mod tests {
 				DigestItem::Seal(AURA_ENGINE_ID, FromHex::from_hex("220b93bbbb5af5352c2da639536b2c0ac33e6cfe4d765846f33838344e24fb54373092c0b16671414d431828ddb771552e17a89a67928e88e5ac343a0021548e").unwrap())
 			]}
 		);
+
 		let full_justification = AlephFullJustification { header, justification };
-
-		verify_justification(&authority_set, &full_justification);
-
 		assert!(verify_justification(&authority_set, &full_justification).is_ok());
 	}
 }
