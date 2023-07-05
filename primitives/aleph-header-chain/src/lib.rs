@@ -23,21 +23,12 @@ use core::{clone::Clone, cmp::Eq, default::Default, fmt::Debug};
 use scale_info::TypeInfo;
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
-use sp_runtime::{traits::Header as HeaderT, ConsensusEngineId, KeyTypeId, RuntimeDebug};
+use sp_runtime::{traits::Header as HeaderT, RuntimeDebug};
 use sp_std::boxed::Box;
 
 pub mod aleph_justification;
 
-pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"alp0");
-pub const ALEPH_ENGINE_ID: ConsensusEngineId = *b"FRNK";
-
-mod app {
-	use sp_application_crypto::{app_crypto, ed25519};
-	app_crypto!(ed25519, crate::KEY_TYPE);
-}
-
-pub type AuthorityId = app::Public;
-pub type AuthoritySignature = app::Signature;
+pub use aleph_primitives::{KEY_TYPE, ALEPH_ENGINE_ID, AuthorityId, AuthorityPair, AuthoritySignature};
 pub type AuthoritySet = Vec<AuthorityId>;
 
 /// Data required for initializing the Aleph bridge pallet.
