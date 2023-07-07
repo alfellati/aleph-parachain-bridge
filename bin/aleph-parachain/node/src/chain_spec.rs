@@ -1,5 +1,5 @@
 use aleph_parachain_runtime::{
-	AccountId, AuraId, RuntimeGenesisConfig, Signature, EXISTENTIAL_DEPOSIT,
+	AccountId, AuraId, RuntimeGenesisConfig, Signature, SudoConfig, EXISTENTIAL_DEPOSIT,
 };
 use cumulus_primitives_core::ParaId;
 use sc_chain_spec::{ChainSpecExtension, ChainSpecGroup};
