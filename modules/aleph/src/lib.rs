@@ -120,7 +120,19 @@ pub mod pallet {
 			Ok(().into())
 		}
 
+		/// Change `PalletOwner`.
+		///
+		/// May only be called either by root, or by `PalletOwner`.
 		#[pallet::call_index(2)]
+		#[pallet::weight((T::DbWeight::get().reads_writes(1, 1), DispatchClass::Operational))]
+		pub fn set_owner(origin: OriginFor<T>, new_owner: Option<T::AccountId>) -> DispatchResult {
+			<Self as OwnedBridgeModule<_>>::set_owner(origin, new_owner)
+		}
+
+		/// Halt or resume all pallet operations.
+		///
+		/// May only be called either by root, or by `PalletOwner`.
+		#[pallet::call_index(3)]
 		#[pallet::weight((T::DbWeight::get().reads_writes(1, 1), DispatchClass::Operational))]
 		pub fn set_operating_mode(
 			origin: OriginFor<T>,
