@@ -3,7 +3,7 @@ use sp_runtime::{traits::Header as HeaderT, RuntimeDebug};
 
 use sp_std::{vec, vec::Vec};
 
-use crate::{AuthoritySet, AuthoritySignature};
+use crate::AuthoritySignature;
 use scale_info::TypeInfo;
 
 #[derive(TypeInfo, PartialEq, Eq, Clone, Debug, Decode, Encode)]
