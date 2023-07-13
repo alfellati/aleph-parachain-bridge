@@ -1,4 +1,4 @@
-use codec::{Decode, Encode};
+/*use codec::{Decode, Encode};
 use sp_runtime::{traits::Header as HeaderT, RuntimeDebug};
 
 use crate::AuthoritySignature;
@@ -49,4 +49,4 @@ impl<H: HeaderT> bp_header_chain::FinalityProof<H::Number> for AlephFullJustific
 	fn target_header_number(&self) -> H::Number {
 		*self.header().number()
 	}
-}
+}*/

@@ -21,10 +21,9 @@ use bp_runtime::{BasicOperatingMode, Chain, HeaderOf};
 use codec::{Decode, Encode};
 use core::{clone::Clone, cmp::Eq, default::Default, fmt::Debug};
 use scale_info::TypeInfo;
-#[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
 use sp_runtime::{traits::Header as HeaderT, ConsensusEngineId, KeyTypeId, RuntimeDebug};
-use sp_std::boxed::Box;
+use sp_std::{boxed::Box, vec::Vec};
 
 pub mod aleph_justification;
 
@@ -43,8 +42,9 @@ pub type AuthoritySet = Vec<AuthorityId>;
 /// Data required for initializing the Aleph bridge pallet.
 ///
 /// The bridge needs to know where to start its sync from, and this provides that initial context.
-#[derive(Default, Encode, Decode, RuntimeDebug, PartialEq, Eq, Clone, TypeInfo)]
-#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(
+	Default, Encode, Decode, RuntimeDebug, PartialEq, Eq, Clone, TypeInfo, Serialize, Deserialize,
+)]
 pub struct InitializationData<H: HeaderT> {
 	/// The header from which we should start syncing.
 	pub header: Box<H>,
