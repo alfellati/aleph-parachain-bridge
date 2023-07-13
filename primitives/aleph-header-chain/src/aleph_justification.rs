@@ -1,19 +1,51 @@
-/*use codec::{Decode, Encode};
+use codec::{Decode, Encode};
 use sp_runtime::{traits::Header as HeaderT, RuntimeDebug};
 
-use crate::AuthoritySignature;
+use sp_std::{vec, vec::Vec};
 
-#[derive(PartialEq, Eq, Clone, Debug, Hash, Decode, Encode)]
+use crate::{AuthoritySet, AuthoritySignature};
+use scale_info::TypeInfo;
+
+#[derive(TypeInfo, PartialEq, Eq, Clone, Debug, Decode, Encode)]
 pub struct Signature(AuthoritySignature);
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Encode, Decode)]
-pub struct SignatureSet<Signature>(pub aleph_bft_crypto::SignatureSet<Signature>);
+// This could be pulled from aleph_bft_cryto, but we need to implement TypeInfo for it.
+// TODO: add TypeInfo to aleph_bft_crypto::NodeMap and reuse it here.
+#[derive(TypeInfo, Clone, Eq, PartialEq, Debug, Default, Decode, Encode)]
+pub struct SignatureSet(Vec<Option<Signature>>);
+
+impl SignatureSet {
+	/// Constructs a new node map with a given length.
+	pub fn with_size(len: usize) -> Self {
+		let v = vec![None; len];
+		SignatureSet(v)
+	}
+
+	pub fn size(&self) -> usize {
+		self.0.len()
+	}
+
+	pub fn iter(&self) -> impl Iterator<Item = (usize, &Signature)> {
+		self.0
+			.iter()
+			.enumerate()
+			.filter_map(|(idx, maybe_value)| Some((idx, maybe_value.as_ref()?)))
+	}
+
+	pub fn get(&self, node_id: usize) -> Option<&Signature> {
+		self.0[node_id].as_ref()
+	}
+
+	pub fn insert(&mut self, node_id: usize, value: Signature) {
+		self.0[node_id] = Some(value)
+	}
+}
 
 /// A proof of block finality, currently in the form of a sufficiently long list of signatures or a
 /// sudo signature of a block for emergency finalization.
-#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
+#[derive(TypeInfo, Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum AlephJustification {
-	CommitteeMultisignature(SignatureSet<Signature>),
+	CommitteeMultisignature(SignatureSet),
 	EmergencySignature(AuthoritySignature),
 }
 
@@ -49,4 +81,4 @@ impl<H: HeaderT> bp_header_chain::FinalityProof<H::Number> for AlephFullJustific
 	fn target_header_number(&self) -> H::Number {
 		*self.header().number()
 	}
-}*/
+}
