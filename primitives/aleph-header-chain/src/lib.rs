@@ -21,12 +21,9 @@ use bp_runtime::{BasicOperatingMode, Chain, HeaderOf};
 use codec::{Decode, Encode};
 use core::{clone::Clone, cmp::Eq, default::Default, fmt::Debug};
 use scale_info::TypeInfo;
-#[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
 use sp_runtime::{traits::Header as HeaderT, ConsensusEngineId, KeyTypeId, RuntimeDebug};
-use sp_std::boxed::Box;
-
-pub mod aleph_justification;
+use sp_std::{boxed::Box, vec::Vec};
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"alp0");
 pub const ALEPH_ENGINE_ID: ConsensusEngineId = *b"FRNK";
@@ -36,6 +33,10 @@ mod app {
 	app_crypto!(ed25519, crate::KEY_TYPE);
 }
 
+sp_application_crypto::with_pair! {
+    pub type AuthorityPair = app::Pair;
+}
+
 pub type AuthorityId = app::Public;
 pub type AuthoritySignature = app::Signature;
 pub type AuthoritySet = Vec<AuthorityId>;
@@ -43,8 +44,9 @@ pub type AuthoritySet = Vec<AuthorityId>;
 /// Data required for initializing the Aleph bridge pallet.
 ///
 /// The bridge needs to know where to start its sync from, and this provides that initial context.
-#[derive(Default, Encode, Decode, RuntimeDebug, PartialEq, Eq, Clone, TypeInfo)]
-#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(
+	Default, Encode, Decode, RuntimeDebug, PartialEq, Eq, Clone, TypeInfo, Serialize, Deserialize,
+)]
 pub struct InitializationData<H: HeaderT> {
 	/// The header from which we should start syncing.
 	pub header: Box<H>,
@@ -66,7 +68,5 @@ pub type BridgeAlephCallOf<C> = BridgeAlephCall<HeaderOf<C>>;
 
 pub trait ChainWithAleph: Chain {
 	const WITH_CHAIN_ALEPH_PALLET_NAME: &'static str;
-	const MAX_HEADER_SIZE: u32;
 	const MAX_AUTHORITIES_COUNT: u32;
-	const AVERAGE_HEADER_SIZE_IN_JUSTIFICATION: u32;
 }
