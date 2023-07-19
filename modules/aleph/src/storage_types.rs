@@ -24,36 +24,29 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use frame_support::{traits::Get, BoundedVec, RuntimeDebugNoBound};
 use scale_info::TypeInfo;
 
-use sp_std::{marker::PhantomData, vec::Vec};
+use sp_std::marker::PhantomData;
 
-pub type AuthorityList = Vec<AuthorityId>;
+pub struct MaxAuthoritiesCount<T: Config>(PhantomData<T>);
 
-/// A bounded list of AlephBFT authorities.
-pub type StoredAuthorityList<MaxBridgedAuthorities> =
-	BoundedVec<AuthorityId, MaxBridgedAuthorities>;
-
-/// Adapter for using `T::BridgedChain::MAX_BRIDGED_AUTHORITIES` in `BoundedVec`.
-pub struct StoredAuthorityListLimit<T>(PhantomData<T>);
-
-impl<T: Config> Get<u32> for StoredAuthorityListLimit<T> {
+impl<T: Config> Get<u32> for MaxAuthoritiesCount<T> {
 	fn get() -> u32 {
 		T::BridgedChain::MAX_AUTHORITIES_COUNT
 	}
 }
 
-/// A wrapper around bounded AlephBFT Authority List.
+/// Bounded AlephBFT Authority Set.
 #[derive(Clone, Decode, Encode, TypeInfo, MaxEncodedLen, RuntimeDebugNoBound)]
 #[scale_info(skip_type_params(T))]
 pub struct StoredAuthoritySet<T: Config> {
-	/// List of AlephBFT authorities for the current round.
-	pub authorities: StoredAuthorityList<StoredAuthorityListLimit<T>>,
+	/// List of AlephBFT authorities for the current session.
+	pub authorities: BoundedVec<AuthorityId, MaxAuthoritiesCount<T>>,
 }
 
 impl<T: Config> StoredAuthoritySet<T> {
 	/// Try to create a new bounded AlephBFT Authority Set from unbounded list.
 	///
 	/// Returns error if number of authorities in the provided list is too large.
-	pub fn try_new(authorities: AuthorityList) -> Result<Self, Error<T>> {
+	pub fn try_new(authorities: AuthoritySet) -> Result<Self, Error<T>> {
 		Ok(Self {
 			authorities: TryFrom::try_from(authorities)
 				.map_err(|_| Error::TooManyAuthoritiesInSet)?,
@@ -63,7 +56,7 @@ impl<T: Config> StoredAuthoritySet<T> {
 
 impl<T: Config> Default for StoredAuthoritySet<T> {
 	fn default() -> Self {
-		StoredAuthoritySet { authorities: BoundedVec::default() }
+		Self { authorities: BoundedVec::default() }
 	}
 }
 
