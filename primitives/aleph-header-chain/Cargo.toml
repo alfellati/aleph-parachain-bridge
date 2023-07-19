@@ -22,10 +22,10 @@ frame-support = { git = "https://github.com/paritytech/substrate", branch = "mas
 sp-core = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
 sp-runtime = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
 sp-std = { git = "https://github.com/paritytech/substrate", branch = "master", default-features = false }
+hex = { version = "0.4", optional = true }
 
 [dev-dependencies]
 bp-test-utils = { path = "../test-utils" }
-hex = "0.4"
 
 [features]
 default = ["std"]
@@ -34,6 +34,7 @@ std = [
 	"bp-header-chain/std",
 	"codec/std",
 	"frame-support/std",
+	"hex/std",
 	"scale-info/std",
 	"serde/std",
 	"sp-core/std",

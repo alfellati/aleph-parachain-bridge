@@ -1,96 +1,134 @@
 use codec::{Decode, Encode, Input};
+use frame_support::PalletError;
 use sp_runtime::{traits::Header as HeaderT, RuntimeAppPublic, RuntimeDebug};
+use sp_std::{vec, vec::Vec};
 
 use crate::{AuthoritySet, AuthoritySignature};
+use scale_info::TypeInfo;
 
-#[derive(PartialEq, Eq, Clone, Debug, Hash, Decode, Encode)]
+#[derive(TypeInfo, PartialEq, Eq, Clone, Debug, Decode, Encode)]
 pub struct Signature(AuthoritySignature);
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Encode, Decode)]
-pub struct SignatureSet<Signature>(pub aleph_bft_crypto::SignatureSet<Signature>);
+// This could be pulled from aleph_bft_cryto, but we need to implement TypeInfo for it.
+// TODO: add TypeInfo to aleph_bft_crypto::NodeMap and reuse it here.
+#[derive(TypeInfo, Clone, Eq, PartialEq, Debug, Default, Decode, Encode)]
+pub struct SignatureSet(Vec<Option<Signature>>);
+
+impl SignatureSet {
+	/// Constructs a new node map with a given length.
+	pub fn with_size(len: usize) -> Self {
+		let v = vec![None; len];
+		SignatureSet(v)
+	}
+
+	pub fn size(&self) -> usize {
+		self.0.len()
+	}
+
+	pub fn iter(&self) -> impl Iterator<Item = (usize, &Signature)> {
+		self.0
+			.iter()
+			.enumerate()
+			.filter_map(|(idx, maybe_value)| Some((idx, maybe_value.as_ref()?)))
+	}
+
+	pub fn get(&self, node_id: usize) -> Option<&Signature> {
+		self.0[node_id].as_ref()
+	}
+
+	pub fn insert(&mut self, node_id: usize, value: Signature) {
+		self.0[node_id] = Some(value)
+	}
+}
 
 /// A proof of block finality, currently in the form of a sufficiently long list of signatures or a
 /// sudo signature of a block for emergency finalization.
-#[derive(Clone, Decode, Debug, PartialEq, Eq)]
+#[derive(TypeInfo, Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub enum AlephJustification {
-	CommitteeMultisignature(SignatureSet<Signature>),
+	CommitteeMultisignature(SignatureSet),
 	EmergencySignature(AuthoritySignature),
 }
 
-#[derive(RuntimeDebug, Clone, PartialEq, Eq)]
-pub struct AlephFullJustification<Header: HeaderT> {
-	header: Header,
+#[derive(Eq, Encode, Decode, PartialEq, Debug, Copy, Clone)]
+pub struct Version(pub u16);
+
+/// Actual on-chain justification format.
+#[derive(Clone, Encode, Debug, PartialEq, Eq)]
+pub struct VersionedAlephJustification {
+	version: Version,
+	num_bytes: u16,
 	justification: AlephJustification,
 }
 
-#[derive(Eq, Decode, PartialEq, Debug, Copy, Clone)]
-pub struct Version(pub u16);
+impl Decode for VersionedAlephJustification {
+	fn decode<I: Input>(input: &mut I) -> Result<Self, codec::Error> {
+		let version = Version::decode(input)?;
+		let num_bytes = u16::decode(input)?;
+		let justification = match version {
+			Version(3) => AlephJustification::decode(input)?,
+			_ => return Err(codec::Error::from("Unsupported justification version")),
+		};
+		Ok(VersionedAlephJustification { version, num_bytes, justification })
+	}
+}
 
-pub fn decode_versioned_aleph_justification<I: Input>(
-	input: &mut I,
-) -> Result<AlephJustification, Error> {
-	let version = Version::decode(input).map_err(|_| Error::JustificationNotDecodable)?;
-	let _num_bytes = u16::decode(input).map_err(|_| Error::JustificationNotDecodable)?;
-	match version {
-		Version(3) =>
-			Ok(AlephJustification::decode(input).map_err(|_| Error::JustificationNotDecodable)?),
-		_ => Err(Error::UnsupportedJustificationVersion),
+impl From<VersionedAlephJustification> for AlephJustification {
+	fn from(justification: VersionedAlephJustification) -> Self {
+		justification.justification
+	}
+}
+
+#[derive(RuntimeDebug, Clone, Encode, PartialEq, Eq)]
+pub struct AlephFullJustification<Header: HeaderT> {
+	header_number: Header::Number,
+	justification: AlephJustification,
+}
+
+impl<Header: HeaderT> Decode for AlephFullJustification<Header> {
+	fn decode<I: Input>(input: &mut I) -> Result<Self, codec::Error> {
+		let versioned_justification = VersionedAlephJustification::decode(input)?;
+		Ok(AlephFullJustification { header_number: 0u32.into(), justification: versioned_justification.justification })
 	}
 }
 
 impl<Header: HeaderT> AlephFullJustification<Header> {
-	pub fn new(header: Header, justification: AlephJustification) -> Self {
-		Self { header, justification }
-	}
-
-	pub fn header(&self) -> &Header {
-		&self.header
-	}
-
 	pub fn justification(&self) -> &AlephJustification {
 		&self.justification
 	}
+}
 
-	pub fn justification_mut(&mut self) -> &mut AlephJustification {
-		&mut self.justification
-	}
-
-	pub fn into_justification(self) -> AlephJustification {
-		self.justification
-	}
-
-	pub fn into_header(self) -> Header {
-		self.header
+impl<Header: HeaderT> From<AlephFullJustification<Header>> for AlephJustification {
+	fn from(value: AlephFullJustification<Header>) -> Self {
+		value.justification
 	}
 }
 
-impl<H: HeaderT> bp_header_chain::FinalityProof<H::Number> for AlephFullJustification<H> {
-	fn target_header_number(&self) -> H::Number {
-		*self.header().number()
+impl<Header: HeaderT> bp_header_chain::FinalityProof<Header::Number> for AlephFullJustification<Header> {
+	fn target_header_number(&self) -> Header::Number {
+		self.header_number
 	}
 }
 
-#[derive(Eq, RuntimeDebug, PartialEq)]
+#[derive(Eq, RuntimeDebug, PartialEq, Encode, Decode, TypeInfo, PalletError)]
 pub enum Error {
-	UnsupportedJustificationVersion,
 	JustificationNotDecodable,
 	NotEnoughCorrectSignatures,
 	InvalidIndex,
-	Emergency,
+	EmergencyFinalizerUsed,
 }
 
 pub fn verify_justification<Header: HeaderT>(
 	authority_set: &AuthoritySet,
-	justification: &AlephFullJustification<Header>,
+	header: &Header,
+	justification: &AlephJustification,
 ) -> Result<(), Error> {
-	match justification.justification() {
+	match justification {
 		AlephJustification::CommitteeMultisignature(signature_set) => {
 			let mut signature_count = 0;
 
-			for (index, signature) in signature_set.0.iter() {
-				let authority = authority_set.get(index.0).ok_or(Error::InvalidIndex)?;
-
-				if authority.verify(&justification.header().hash().encode(), &signature.0) {
+			for (index, signature) in signature_set.iter() {
+				let authority = authority_set.get(index).ok_or(Error::InvalidIndex)?;
+				if authority.verify(&header.hash().encode(), &signature.0) {
 					signature_count += 1;
 				}
 			}
@@ -101,21 +139,22 @@ pub fn verify_justification<Header: HeaderT>(
 
 			Ok(())
 		},
-		AlephJustification::EmergencySignature(_) => Err(Error::Emergency),
+		AlephJustification::EmergencySignature(_) => Err(Error::EmergencyFinalizerUsed),
 	}
 }
 
-// Tests
-#[cfg(test)]
-mod tests {
+#[cfg(feature = "std")]
+pub mod test_utils {
 	use super::*;
 	use crate::AuthorityId;
-	use bp_test_utils::test_header;
 	use hex::FromHex;
 	use sp_application_crypto::Pair;
-	use sp_runtime::{testing::Header, ConsensusEngineId, Digest, DigestItem};
+	use sp_runtime::{testing::Header, ConsensusEngineId};
 
-	fn generate_seeds(size: usize) -> Vec<[u8; 32]> {
+	pub type Seed = [u8; 32];
+	pub type Seeds = Vec<Seed>;
+
+	pub fn generate_seeds(size: usize) -> Seeds {
 		let mut seed = [0u8; 32];
 		let mut seeds = Vec::new();
 		for i in 0..size {
@@ -125,15 +164,15 @@ mod tests {
 		seeds
 	}
 
-	fn authority_id_from_seed(s: &[u8; 32]) -> AuthorityId {
+	pub fn authority_id_from_seed(s: &Seed) -> AuthorityId {
 		pair_from_seed(s).public()
 	}
 
-	fn pair_from_seed(s: &[u8; 32]) -> crate::app::Pair {
+	pub fn pair_from_seed(s: &Seed) -> crate::app::Pair {
 		crate::app::Pair::from_seed(s)
 	}
 
-	fn authority_set(seeds: Vec<[u8; 32]>) -> AuthoritySet {
+	pub fn generate_authority_set(seeds: Seeds) -> AuthoritySet {
 		let mut authority_set = AuthoritySet::new();
 		for authority in seeds.iter() {
 			authority_set.push(authority_id_from_seed(authority));
@@ -141,57 +180,69 @@ mod tests {
 		authority_set
 	}
 
-	fn generate_default_signature_set(header: &Header) -> SignatureSet<Signature> {
-		use aleph_bft_crypto::{NodeCount, NodeIndex, NodeMap};
-		use std::collections::HashMap;
-
-		let mut hashmap = HashMap::new();
-		for (index, authority) in generate_seeds(4).iter().enumerate() {
+	pub fn generate_signature_set(header: &Header, seeds: &Seeds) -> SignatureSet {
+		let mut signatures = Vec::new();
+		for authority in seeds.iter() {
 			let aleph_authority = pair_from_seed(authority);
 			let signature = aleph_authority.sign(&header.hash().encode());
-			hashmap.insert(NodeIndex(index), Signature(signature));
+			signatures.push(Some(Signature(signature)));
 		}
 
-		SignatureSet(NodeMap::from_hashmap(NodeCount(4), hashmap))
+		SignatureSet(signatures)
 	}
 
-	fn default_test_justification() -> AlephFullJustification<sp_runtime::testing::Header> {
-		let header = test_header(5);
-		let signature_set = generate_default_signature_set(&header);
-		let justification = AlephJustification::CommitteeMultisignature(signature_set);
-
-		AlephFullJustification::new(header, justification)
+	pub fn generate_justification(header: &Header, seeds: &Seeds) -> AlephJustification {
+		let signature_set = generate_signature_set(header, seeds);
+		AlephJustification::CommitteeMultisignature(signature_set)
 	}
+
+	pub fn decode_from_hex<D: Decode>(data: &str) -> D {
+		Decode::decode(&mut &Vec::from_hex(data).unwrap()[..]).unwrap()
+	}
+
+	pub const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
+
+	pub fn raw_authorities_into_authority_set(raw_authorities: &[&str]) -> AuthoritySet {
+		let mut authorities = Vec::new();
+		println!("raw_authorities: {:?}", raw_authorities);
+		for raw_authority in raw_authorities {
+			authorities.push(decode_from_hex(raw_authority));
+		}
+		authorities
+	}
+
+	pub fn aleph_justification_from_hex(hex: &str) -> AlephJustification {
+		let encoded_justification: Vec<u8> = FromHex::from_hex(hex).unwrap();
+		let versioned_justification = VersionedAlephJustification::decode(&mut encoded_justification.as_slice()).unwrap();
+		versioned_justification.into()
+	}
+}
+
+
+#[cfg(test)]
+pub mod tests {
+	use super::{test_utils::*, *};
+	use bp_test_utils::test_header;
+	use hex::FromHex;
+	use sp_runtime::{testing::Header, Digest, DigestItem};
 
 	#[test]
 	fn accepts_valid_justification() {
-		let justification = default_test_justification();
-		let authority_set = authority_set(generate_seeds(4));
+		let header = test_header(5);
+		let justification = generate_justification(&header, &generate_seeds(4));
+		let authority_set = generate_authority_set(generate_seeds(4));
 
-		assert!(verify_justification(&authority_set, &justification).is_ok());
+		assert!(verify_justification(&authority_set, &header, &justification).is_ok());
 	}
 
 	#[test]
 	fn rejects_justification_with_too_little_signatures() {
-		let justification = default_test_justification();
-		let authority_set = authority_set(generate_seeds(6));
+		let header = test_header(5);
+		let justification = generate_justification(&header, &generate_seeds(4));
+		let authority_set = generate_authority_set(generate_seeds(6));
 
-		assert!(verify_justification(&authority_set, &justification).is_err());
+		assert!(verify_justification(&authority_set, &header, &justification).is_err());
 	}
-
-	#[test]
-	fn incorrect_indices() {
-		let justification = default_test_justification();
-		let authority_set = authority_set(generate_seeds(3));
-
-		assert!(verify_justification(&authority_set, &justification).is_err());
-	}
-
-	fn decode_from_hex<D: Decode>(data: &str) -> D {
-		Decode::decode(&mut &Vec::from_hex(data).unwrap()[..]).unwrap()
-	}
-
-	const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 
 	const DEVNET_JUSTIFICATION: &str = "0300c60000100182e110ef61d591076351794f8d0927ddf0ee3aa4fcf0de6d3b4a07c9c0ce836a7d2efb1e7aef1ff645a1337a2b3eebccf80c78feba49e1f11997c636a6999f0d0001ecb430ade18767790b85280a134ae73dce133ee614f167c3f88f9fb3cf6a3c583f8e604410f3750bb86292167e86f06fd687fc1eb840c47cc27379a8e752d30e017b7e8504257b9e55dfb5f06a9e0a22d1b94aa8da0f202fc685ef6089d8a9286d011e687c8db69e7162b4b07ed55b35f837f22f93aacdb4e54dafe2d2dbde8509";
 	const DEVNET_AUTHORITIES: [&str; 4] = [
@@ -220,33 +271,22 @@ mod tests {
 		"f4ad895cce6857c6f8b955d55907969ee6a8f177187921e771cee52bd7b2b800",
 	];
 
-	fn raw_authorities_into_authority_set(raw_authorities: &[&str]) -> AuthoritySet {
-		let mut authorities = Vec::new();
-		println!("raw_authorities: {:?}", raw_authorities);
-		for raw_authority in raw_authorities {
-			authorities.push(decode_from_hex(raw_authority));
-		}
-		authorities
-	}
-
 	#[test]
 	fn devnet_justification_decodes() {
 		let encoded_justification: Vec<u8> = FromHex::from_hex(DEVNET_JUSTIFICATION).unwrap();
-		assert!(decode_versioned_aleph_justification(&mut encoded_justification.as_slice()).is_ok());
+		assert!(VersionedAlephJustification::decode(&mut encoded_justification.as_slice()).is_ok());
 	}
 
 	#[test]
-	fn mainnet_justification_decode() {
+	fn mainnet_justification_decodes() {
 		let encoded_justification: Vec<u8> = FromHex::from_hex(MAINNET_JUSTIFICATION).unwrap();
-		assert!(decode_versioned_aleph_justification(&mut encoded_justification.as_slice()).is_ok());
+		assert!(VersionedAlephJustification::decode(&mut encoded_justification.as_slice()).is_ok());
 	}
 
 	#[test]
 	fn devnet_justification_is_valid() {
 		let authority_set = raw_authorities_into_authority_set(&DEVNET_AUTHORITIES);
-		let encoded_justification: Vec<u8> = FromHex::from_hex(DEVNET_JUSTIFICATION).unwrap();
-		let justification =
-			decode_versioned_aleph_justification(&mut encoded_justification.as_slice()).unwrap();
+		let justification = aleph_justification_from_hex(DEVNET_JUSTIFICATION);
 		let header = Header::new(
 			49,
 			decode_from_hex("bf45a153b83c7981aede86e12cd072a1fde518dda899b7f9a5b222eaa432b9a0"),
@@ -259,16 +299,13 @@ mod tests {
 			]}
 		);
 
-		let full_justification = AlephFullJustification { header, justification };
-		assert!(verify_justification(&authority_set, &full_justification).is_ok());
+		assert!(verify_justification(&authority_set, &header, &justification).is_ok());
 	}
 
 	#[test]
 	fn mainnet_justification_is_valid() {
 		let authority_set = raw_authorities_into_authority_set(&MAINNET_AUTHORITIES);
-		let encoded_justification: Vec<u8> = FromHex::from_hex(MAINNET_JUSTIFICATION).unwrap();
-		let justification =
-			decode_versioned_aleph_justification(&mut encoded_justification.as_slice()).unwrap();
+		let justification = aleph_justification_from_hex(MAINNET_JUSTIFICATION);
 		let header = Header::new(
 			51730103,
 			decode_from_hex("78d422f744c6207f40ceb5504021803a7551c03e74b3e2c847df2a052b565942"),
@@ -281,7 +318,6 @@ mod tests {
 			]}
 		);
 
-		let full_justification = AlephFullJustification { header, justification };
-		assert!(verify_justification(&authority_set, &full_justification).is_ok());
+		assert!(verify_justification(&authority_set, &header, &justification).is_ok());
 	}
 }
