@@ -156,11 +156,11 @@ pub mod test_utils {
 
 	pub fn aleph_justification_from_hex(hex: &str) -> AlephJustification {
 		let encoded_justification: Vec<u8> = FromHex::from_hex(hex).unwrap();
-		let versioned_justification = VersionedAlephJustification::decode(&mut encoded_justification.as_slice()).unwrap();
+		let versioned_justification =
+			VersionedAlephJustification::decode(&mut encoded_justification.as_slice()).unwrap();
 		versioned_justification.into()
 	}
 }
-
 
 #[cfg(test)]
 pub mod tests {

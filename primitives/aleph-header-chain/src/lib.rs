@@ -36,7 +36,7 @@ mod app {
 }
 
 sp_application_crypto::with_pair! {
-    pub type AuthorityPair = app::Pair;
+	pub type AuthorityPair = app::Pair;
 }
 
 pub type AuthorityId = app::Public;
