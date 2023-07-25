@@ -1,7 +1,7 @@
 use codec::{Decode, Encode, Input};
 use frame_support::PalletError;
 use sp_runtime::{traits::Header as HeaderT, RuntimeAppPublic, RuntimeDebug};
-use sp_std::{vec, vec::Vec};
+use sp_std::vec::Vec;
 
 use crate::{AuthoritySet, AuthoritySignature};
 use scale_info::TypeInfo;
@@ -9,37 +9,7 @@ use scale_info::TypeInfo;
 #[derive(TypeInfo, PartialEq, Eq, Clone, Debug, Decode, Encode)]
 pub struct Signature(AuthoritySignature);
 
-// This could be pulled from aleph_bft_cryto, but we need to implement TypeInfo for it.
-// TODO: add TypeInfo to aleph_bft_crypto::NodeMap and reuse it here.
-#[derive(TypeInfo, Clone, Eq, PartialEq, Debug, Default, Decode, Encode)]
-pub struct SignatureSet(Vec<Option<Signature>>);
-
-impl SignatureSet {
-	/// Constructs a new node map with a given length.
-	pub fn with_size(len: usize) -> Self {
-		let v = vec![None; len];
-		SignatureSet(v)
-	}
-
-	pub fn size(&self) -> usize {
-		self.0.len()
-	}
-
-	pub fn iter(&self) -> impl Iterator<Item = (usize, &Signature)> {
-		self.0
-			.iter()
-			.enumerate()
-			.filter_map(|(idx, maybe_value)| Some((idx, maybe_value.as_ref()?)))
-	}
-
-	pub fn get(&self, node_id: usize) -> Option<&Signature> {
-		self.0[node_id].as_ref()
-	}
-
-	pub fn insert(&mut self, node_id: usize, value: Signature) {
-		self.0[node_id] = Some(value)
-	}
-}
+pub type SignatureSet = Vec<Option<Signature>>;
 
 /// A proof of block finality, currently in the form of a sufficiently long list of signatures or a
 /// sudo signature of a block for emergency finalization.
@@ -94,8 +64,12 @@ pub fn verify_justification<Header: HeaderT>(
 	match justification {
 		AlephJustification::CommitteeMultisignature(signature_set) => {
 			let mut signature_count = 0;
+			let enumerated_signatures = signature_set
+				.iter()
+				.enumerate()
+				.filter_map(|(idx, maybe_value)| Some((idx, maybe_value.as_ref()?)));
 
-			for (index, signature) in signature_set.iter() {
+			for (index, signature) in enumerated_signatures {
 				let authority = authority_set.get(index).ok_or(Error::InvalidIndex)?;
 				if authority.verify(&header.hash().encode(), &signature.0) {
 					signature_count += 1;
@@ -157,7 +131,7 @@ pub mod test_utils {
 			signatures.push(Some(Signature(signature)));
 		}
 
-		SignatureSet(signatures)
+		signatures
 	}
 
 	pub fn generate_justification(header: &Header, seeds: &Seeds) -> AlephJustification {
