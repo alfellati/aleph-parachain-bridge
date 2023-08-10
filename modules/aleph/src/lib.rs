@@ -285,7 +285,7 @@ pub mod pallet {
 	}
 
 	/// Adapter for using `Config::HeadersToKeep` as `MaxValues` bound in our storage maps.
-	// We need to use it since `StorageMap` implementation expects Get<Option<u32>> for `MaxValues`.
+	/// We need to use it since `StorageMap` implementation expects Get<Option<u32>> for `MaxValues`.
 	pub struct HeadersToKeepOption<T>(PhantomData<T>);
 
 	impl<T: Config> Get<Option<u32>> for HeadersToKeepOption<T> {
