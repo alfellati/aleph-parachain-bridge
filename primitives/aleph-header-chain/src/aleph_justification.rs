@@ -46,13 +46,12 @@ pub fn verify_justification<Header: HeaderT>(
 		AlephJustification::CommitteeMultisignature(signature_set) => {
 			let signature_count = signature_set
 				.iter()
-				.enumerate()
-				.filter_map(|(idx, maybe_value)| Some((idx, maybe_value.as_ref()?)))
-				.filter(|(idx, signature)| {
-					authority_set
-						.get(*idx)
-						.map(|authority| authority.verify(&header.hash().encode(), &signature.0))
-						.unwrap_or(false)
+				.zip(authority_set.iter())
+				.filter_map(|(maybe_signature, authority)| {
+					Some((maybe_signature.as_ref()?, authority))
+				})
+				.filter(|(signature, authority)| {
+					authority.verify(&header.hash().encode(), &signature.0)
 				})
 				.count();
 
