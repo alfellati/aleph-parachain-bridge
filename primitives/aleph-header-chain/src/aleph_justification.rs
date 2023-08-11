@@ -1,4 +1,4 @@
-use codec::{Decode, Encode, Input};
+use codec::{Decode, Encode};
 use frame_support::PalletError;
 use sp_runtime::{traits::Header as HeaderT, RuntimeAppPublic, RuntimeDebug};
 use sp_std::vec::Vec;
@@ -23,29 +23,11 @@ pub enum AlephJustification {
 pub struct Version(pub u16);
 
 /// Actual on-chain justification format.
-#[derive(Clone, Encode, Debug, PartialEq, Eq)]
+#[derive(Clone, Encode, Decode, Debug, PartialEq, Eq)]
 pub struct VersionedAlephJustification {
 	version: Version,
 	num_bytes: u16,
 	justification: AlephJustification,
-}
-
-impl Decode for VersionedAlephJustification {
-	fn decode<I: Input>(input: &mut I) -> Result<Self, codec::Error> {
-		let version = Version::decode(input)?;
-		let num_bytes = u16::decode(input)?;
-		let justification = match version {
-			Version(3) => AlephJustification::decode(input)?,
-			_ => return Err(codec::Error::from("Unsupported justification version")),
-		};
-		Ok(VersionedAlephJustification { version, num_bytes, justification })
-	}
-}
-
-impl From<VersionedAlephJustification> for AlephJustification {
-	fn from(justification: VersionedAlephJustification) -> Self {
-		justification.justification
-	}
 }
 
 #[derive(Eq, RuntimeDebug, PartialEq, Encode, Decode, TypeInfo, PalletError)]
@@ -130,7 +112,6 @@ pub mod test_utils {
 			let signature = aleph_authority.sign(&header.hash().encode());
 			signatures.push(Some(Signature(signature)));
 		}
-
 		signatures
 	}
 
@@ -158,7 +139,7 @@ pub mod test_utils {
 		let encoded_justification: Vec<u8> = FromHex::from_hex(hex).unwrap();
 		let versioned_justification =
 			VersionedAlephJustification::decode(&mut encoded_justification.as_slice()).unwrap();
-		versioned_justification.into()
+		versioned_justification.justification
 	}
 }
 
