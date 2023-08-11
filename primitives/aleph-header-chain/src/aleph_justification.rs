@@ -45,18 +45,17 @@ pub fn verify_justification<Header: HeaderT>(
 ) -> Result<(), Error> {
 	match justification {
 		AlephJustification::CommitteeMultisignature(signature_set) => {
-			let mut signature_count = 0;
-			let enumerated_signatures = signature_set
+			let signature_count = signature_set
 				.iter()
 				.enumerate()
-				.filter_map(|(idx, maybe_value)| Some((idx, maybe_value.as_ref()?)));
-
-			for (index, signature) in enumerated_signatures {
-				let authority = authority_set.get(index).ok_or(Error::InvalidIndex)?;
-				if authority.verify(&header.hash().encode(), &signature.0) {
-					signature_count += 1;
-				}
-			}
+				.filter_map(|(idx, maybe_value)| Some((idx, maybe_value.as_ref()?)))
+				.filter(|(idx, signature)| {
+					authority_set
+						.get(*idx)
+						.map(|authority| authority.verify(&header.hash().encode(), &signature.0))
+						.unwrap_or(false)
+				})
+				.count();
 
 			if signature_count < 2 * authority_set.len() / 3 + 1 {
 				return Err(Error::NotEnoughCorrectSignatures)
