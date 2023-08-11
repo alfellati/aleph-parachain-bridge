@@ -240,7 +240,7 @@ pub mod pallet {
 		///
 		/// Note this function solely takes care of updating the storage and pruning old entries,
 		/// but does not verify the validity of such import.
-		pub(crate) fn insert_header(header: BridgedHeader<T>) {
+		fn insert_header(header: BridgedHeader<T>) {
 			let hash = header.hash();
 			let index = <ImportedHashesPointer<T>>::get();
 			let header_to_prune = <ImportedHashes<T>>::try_get(index).ok();
@@ -285,12 +285,228 @@ pub mod pallet {
 	}
 
 	/// Adapter for using `Config::HeadersToKeep` as `MaxValues` bound in our storage maps.
-	/// We need to use it since `StorageMap` implementation expects Get<Option<u32>> for `MaxValues`.
+	/// We need to use it since `StorageMap` implementation expects Get<Option<u32>> for
+	/// `MaxValues`.
 	pub struct HeadersToKeepOption<T>(PhantomData<T>);
 
 	impl<T: Config> Get<Option<u32>> for HeadersToKeepOption<T> {
 		fn get() -> Option<u32> {
 			Some(T::HeadersToKeep::get())
+		}
+	}
+
+	// Tests for the pallet.
+	#[cfg(test)]
+	mod tests {
+		use super::*;
+		use crate::mock::{
+			run_test, test_header, Aleph, RuntimeOrigin, System, TestHeader, TestRuntime,
+		};
+		use bp_aleph_header_chain::AuthorityId;
+		use bp_runtime::{BasicOperatingMode, UnverifiedStorageProof};
+		use bp_test_utils::{generate_owned_bridge_module_tests, Account, ALICE, BOB, CHARLIE};
+		use frame_support::{
+			assert_noop, assert_ok, dispatch::PostDispatchInfo, storage::generator::StorageValue,
+		};
+		use sp_runtime::DispatchError;
+
+		fn into_authority_set(accounts: Vec<Account>) -> Vec<AuthorityId> {
+			accounts.into_iter().map(|a| AuthorityId::from(a)).collect()
+		}
+
+		fn initialize_substrate_bridge() {
+			System::set_block_number(1);
+			System::reset_events();
+
+			assert_ok!(init_with_origin(RuntimeOrigin::root()));
+		}
+
+		fn init_with_origin(
+			origin: RuntimeOrigin,
+		) -> Result<
+			InitializationData<TestHeader>,
+			sp_runtime::DispatchErrorWithPostInfo<PostDispatchInfo>,
+		> {
+			let genesis = test_header(0);
+
+			let init_data = InitializationData {
+				header: Box::new(genesis),
+				authority_list: into_authority_set(vec![ALICE, BOB, CHARLIE]),
+				operating_mode: BasicOperatingMode::Normal,
+			};
+
+			Aleph::initialize(origin, init_data.clone()).map(|_| init_data)
+		}
+
+		generate_owned_bridge_module_tests!(BasicOperatingMode::Normal, BasicOperatingMode::Halted);
+
+		#[test]
+		fn init_root_origin_can_initialize_pallet() {
+			run_test(|| {
+				assert_ok!(init_with_origin(RuntimeOrigin::root()));
+			})
+		}
+
+		#[test]
+		fn init_normal_user_cannot_initialize_pallet() {
+			run_test(|| {
+				assert_noop!(init_with_origin(RuntimeOrigin::signed(1)), DispatchError::BadOrigin);
+			})
+		}
+
+		#[test]
+		fn init_owner_cannot_initialize_pallet() {
+			run_test(|| {
+				PalletOwner::<TestRuntime>::put(2);
+				assert_noop!(init_with_origin(RuntimeOrigin::signed(2)), DispatchError::BadOrigin);
+			})
+		}
+
+		#[test]
+		fn init_storage_entries_are_correctly_initialized() {
+			run_test(|| {
+				assert_eq!(BestFinalized::<TestRuntime>::get(), None,);
+				assert_eq!(Aleph::best_finalized(), None);
+				assert_eq!(PalletOperatingMode::<TestRuntime>::try_get(), Err(()));
+
+				let init_data = init_with_origin(RuntimeOrigin::root()).unwrap();
+
+				assert!(<ImportedHeaders<TestRuntime>>::contains_key(init_data.header.hash()));
+				assert_eq!(BestFinalized::<TestRuntime>::get().unwrap().1, init_data.header.hash());
+				assert_eq!(
+					CurrentAuthoritySet::<TestRuntime>::get().authorities,
+					init_data.authority_list
+				);
+				assert_eq!(
+					PalletOperatingMode::<TestRuntime>::try_get(),
+					Ok(BasicOperatingMode::Normal)
+				);
+			})
+		}
+
+		#[test]
+		fn init_can_only_initialize_pallet_once() {
+			run_test(|| {
+				initialize_substrate_bridge();
+				assert_noop!(
+					init_with_origin(RuntimeOrigin::root()),
+					<Error<TestRuntime>>::AlreadyInitialized
+				);
+			})
+		}
+
+		#[test]
+		fn init_fails_if_there_are_too_many_authorities_in_the_set() {
+			run_test(|| {
+				let genesis = test_header(0);
+				let init_data = InitializationData {
+				header: Box::new(genesis),
+				authority_list: into_authority_set(
+					(0..(<<TestRuntime as Config>::BridgedChain as ChainWithAleph>::MAX_AUTHORITIES_COUNT as u16) + 1).map(|x| Account(x)).collect(),
+				),
+				operating_mode: BasicOperatingMode::Normal,
+			};
+
+				assert_noop!(
+					Aleph::initialize(RuntimeOrigin::root(), init_data),
+					Error::<TestRuntime>::TooManyAuthoritiesInSet,
+				);
+			});
+		}
+
+		#[test]
+		fn parse_finalized_storage_accepts_valid_proof() {
+			run_test(|| {
+				let (state_root, storage_proof) = UnverifiedStorageProof::try_from_entries::<
+					sp_core::Blake2Hasher,
+				>(Default::default(), &[(b"key1".to_vec(), None)])
+				.expect("UnverifiedStorageProof::try_from_entries() shouldn't fail in tests");
+
+				let mut header = test_header(2);
+				header.set_state_root(state_root);
+
+				let hash = header.hash();
+				<BestFinalized<TestRuntime>>::put(HeaderId(2, hash));
+				<ImportedHeaders<TestRuntime>>::insert(hash, header.build());
+
+				assert_ok!(Aleph::verify_storage_proof(hash, storage_proof).map(|_| ()));
+			});
+		}
+
+		#[test]
+		fn storage_keys_computed_properly() {
+			assert_eq!(
+				PalletOperatingMode::<TestRuntime>::storage_value_final_key().to_vec(),
+				bp_header_chain::storage_keys::pallet_operating_mode_key("Aleph").0,
+			);
+
+			assert_eq!(
+				CurrentAuthoritySet::<TestRuntime>::storage_value_final_key().to_vec(),
+				bp_header_chain::storage_keys::current_authority_set_key("Aleph").0,
+			);
+
+			assert_eq!(
+				BestFinalized::<TestRuntime>::storage_value_final_key().to_vec(),
+				bp_header_chain::storage_keys::best_finalized_key("Aleph").0,
+			);
+		}
+
+		#[test]
+		fn insert_header_simple() {
+			run_test(|| {
+				initialize_substrate_bridge();
+
+				let header = test_header(1);
+				let hash = header.hash();
+
+				Aleph::insert_header(header.clone());
+				assert_eq!(<ImportedHeaders<TestRuntime>>::get(hash), Some(header.build()));
+			})
+		}
+
+		#[test]
+		fn insert_header_pruning() {
+			run_test(|| {
+				initialize_substrate_bridge();
+				let headers_to_keep = <TestRuntime as Config>::HeadersToKeep::get();
+
+				for i in 0..2 * headers_to_keep {
+					let header = test_header(i as u64);
+					Aleph::insert_header(header.clone());
+				}
+
+				assert_eq!(
+					ImportedHeaders::<TestRuntime>::iter().count(),
+					headers_to_keep as usize
+				);
+
+				for i in 0..headers_to_keep {
+					let header = test_header(i as u64);
+					assert!(!<ImportedHeaders<TestRuntime>>::contains_key(header.hash()));
+				}
+
+				for i in headers_to_keep..2 * headers_to_keep {
+					let header = test_header(i as u64);
+					let hash = header.hash();
+					assert!(<ImportedHeaders<TestRuntime>>::contains_key(header.hash()));
+					assert_eq!(<ImportedHeaders<TestRuntime>>::get(hash), Some(header.build()));
+				}
+			})
+		}
+
+		#[test]
+		fn insert_header_best_finalized() {
+			run_test(|| {
+				initialize_substrate_bridge();
+
+				let header_1 = test_header(1);
+				Aleph::insert_header(header_1.clone());
+
+				let header_3 = test_header(3);
+				Aleph::insert_header(header_3.clone());
+
+				assert_eq!(Aleph::best_finalized_number(), Some(3));
+			})
 		}
 	}
 }
@@ -310,216 +526,5 @@ impl<T: Config> HeaderChain<BridgedChain<T>> for AlephChainHeaders<T> {
 		header_hash: HashOf<BridgedChain<T>>,
 	) -> Option<HashOf<BridgedChain<T>>> {
 		ImportedHeaders::<T>::get(header_hash).map(|h| h.state_root)
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::mock::{
-		run_test, test_header, Aleph, RuntimeOrigin, System, TestHeader, TestRuntime,
-	};
-	use bp_aleph_header_chain::AuthorityId;
-	use bp_runtime::{BasicOperatingMode, UnverifiedStorageProof};
-	use bp_test_utils::{generate_owned_bridge_module_tests, Account, ALICE, BOB, CHARLIE};
-	use frame_support::{
-		assert_noop, assert_ok, dispatch::PostDispatchInfo, storage::generator::StorageValue,
-	};
-	use sp_runtime::DispatchError;
-
-	fn into_authority_set(accounts: Vec<Account>) -> Vec<AuthorityId> {
-		accounts.into_iter().map(|a| AuthorityId::from(a)).collect()
-	}
-
-	fn initialize_substrate_bridge() {
-		System::set_block_number(1);
-		System::reset_events();
-
-		assert_ok!(init_with_origin(RuntimeOrigin::root()));
-	}
-
-	fn init_with_origin(
-		origin: RuntimeOrigin,
-	) -> Result<
-		InitializationData<TestHeader>,
-		sp_runtime::DispatchErrorWithPostInfo<PostDispatchInfo>,
-	> {
-		let genesis = test_header(0);
-
-		let init_data = InitializationData {
-			header: Box::new(genesis),
-			authority_list: into_authority_set(vec![ALICE, BOB, CHARLIE]),
-			operating_mode: BasicOperatingMode::Normal,
-		};
-
-		Aleph::initialize(origin, init_data.clone()).map(|_| init_data)
-	}
-
-	generate_owned_bridge_module_tests!(BasicOperatingMode::Normal, BasicOperatingMode::Halted);
-
-	#[test]
-	fn init_root_origin_can_initialize_pallet() {
-		run_test(|| {
-			assert_ok!(init_with_origin(RuntimeOrigin::root()));
-		})
-	}
-
-	#[test]
-	fn init_normal_user_cannot_initialize_pallet() {
-		run_test(|| {
-			assert_noop!(init_with_origin(RuntimeOrigin::signed(1)), DispatchError::BadOrigin);
-		})
-	}
-
-	#[test]
-	fn init_owner_cannot_initialize_pallet() {
-		run_test(|| {
-			PalletOwner::<TestRuntime>::put(2);
-			assert_noop!(init_with_origin(RuntimeOrigin::signed(2)), DispatchError::BadOrigin);
-		})
-	}
-
-	#[test]
-	fn init_storage_entries_are_correctly_initialized() {
-		run_test(|| {
-			assert_eq!(BestFinalized::<TestRuntime>::get(), None,);
-			assert_eq!(Aleph::best_finalized(), None);
-			assert_eq!(PalletOperatingMode::<TestRuntime>::try_get(), Err(()));
-
-			let init_data = init_with_origin(RuntimeOrigin::root()).unwrap();
-
-			assert!(<ImportedHeaders<TestRuntime>>::contains_key(init_data.header.hash()));
-			assert_eq!(BestFinalized::<TestRuntime>::get().unwrap().1, init_data.header.hash());
-			assert_eq!(
-				CurrentAuthoritySet::<TestRuntime>::get().authorities,
-				init_data.authority_list
-			);
-			assert_eq!(
-				PalletOperatingMode::<TestRuntime>::try_get(),
-				Ok(BasicOperatingMode::Normal)
-			);
-		})
-	}
-
-	#[test]
-	fn init_can_only_initialize_pallet_once() {
-		run_test(|| {
-			initialize_substrate_bridge();
-			assert_noop!(
-				init_with_origin(RuntimeOrigin::root()),
-				<Error<TestRuntime>>::AlreadyInitialized
-			);
-		})
-	}
-
-	#[test]
-	fn init_fails_if_there_are_too_many_authorities_in_the_set() {
-		run_test(|| {
-			let genesis = test_header(0);
-			let init_data = InitializationData {
-				header: Box::new(genesis),
-				authority_list: into_authority_set(
-					(0..(<<TestRuntime as Config>::BridgedChain as ChainWithAleph>::MAX_AUTHORITIES_COUNT as u16) + 1).map(|x| Account(x)).collect(),
-				),
-				operating_mode: BasicOperatingMode::Normal,
-			};
-
-			assert_noop!(
-				Aleph::initialize(RuntimeOrigin::root(), init_data),
-				Error::<TestRuntime>::TooManyAuthoritiesInSet,
-			);
-		});
-	}
-
-	#[test]
-	fn parse_finalized_storage_accepts_valid_proof() {
-		run_test(|| {
-			let (state_root, storage_proof) = UnverifiedStorageProof::try_from_entries::<
-				sp_core::Blake2Hasher,
-			>(Default::default(), &[(b"key1".to_vec(), None)])
-			.expect("UnverifiedStorageProof::try_from_entries() shouldn't fail in tests");
-
-			let mut header = test_header(2);
-			header.set_state_root(state_root);
-
-			let hash = header.hash();
-			<BestFinalized<TestRuntime>>::put(HeaderId(2, hash));
-			<ImportedHeaders<TestRuntime>>::insert(hash, header.build());
-
-			assert_ok!(Aleph::verify_storage_proof(hash, storage_proof).map(|_| ()));
-		});
-	}
-
-	#[test]
-	fn storage_keys_computed_properly() {
-		assert_eq!(
-			PalletOperatingMode::<TestRuntime>::storage_value_final_key().to_vec(),
-			bp_header_chain::storage_keys::pallet_operating_mode_key("Aleph").0,
-		);
-
-		assert_eq!(
-			CurrentAuthoritySet::<TestRuntime>::storage_value_final_key().to_vec(),
-			bp_header_chain::storage_keys::current_authority_set_key("Aleph").0,
-		);
-
-		assert_eq!(
-			BestFinalized::<TestRuntime>::storage_value_final_key().to_vec(),
-			bp_header_chain::storage_keys::best_finalized_key("Aleph").0,
-		);
-	}
-
-	#[test]
-	fn insert_header_simple() {
-		run_test(|| {
-			initialize_substrate_bridge();
-
-			let header = test_header(1);
-			let hash = header.hash();
-
-			Aleph::insert_header(header.clone());
-			assert_eq!(<ImportedHeaders<TestRuntime>>::get(hash), Some(header.build()));
-		})
-	}
-
-	#[test]
-	fn insert_header_pruning() {
-		run_test(|| {
-			initialize_substrate_bridge();
-			let headers_to_keep = <TestRuntime as Config>::HeadersToKeep::get();
-
-			for i in 0..2 * headers_to_keep {
-				let header = test_header(i as u64);
-				Aleph::insert_header(header.clone());
-			}
-
-			assert_eq!(ImportedHeaders::<TestRuntime>::iter().count(), headers_to_keep as usize);
-
-			for i in 0..headers_to_keep {
-				let header = test_header(i as u64);
-				assert!(!<ImportedHeaders<TestRuntime>>::contains_key(header.hash()));
-			}
-
-			for i in headers_to_keep..2 * headers_to_keep {
-				let header = test_header(i as u64);
-				let hash = header.hash();
-				assert!(<ImportedHeaders<TestRuntime>>::contains_key(header.hash()));
-				assert_eq!(<ImportedHeaders<TestRuntime>>::get(hash), Some(header.build()));
-			}
-		})
-	}
-
-	#[test]
-	fn insert_header_best_finalized() {
-		run_test(|| {
-			initialize_substrate_bridge();
-
-			let header_1 = test_header(1);
-			Aleph::insert_header(header_1.clone());
-
-			let header_3 = test_header(3);
-			Aleph::insert_header(header_3.clone());
-
-			assert_eq!(Aleph::best_finalized_number(), Some(3));
-		})
 	}
 }

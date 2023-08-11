@@ -16,7 +16,7 @@
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Structs and utilities for testing.
-//! 
+//!
 //! Provides a `TestRuntime`, containing the Aleph bridge pallet,
 //! that can be used in tests instead of an actual runtime.
 
