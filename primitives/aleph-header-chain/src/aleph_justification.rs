@@ -34,7 +34,6 @@ pub struct VersionedAlephJustification {
 pub enum Error {
 	JustificationNotDecodable,
 	NotEnoughCorrectSignatures,
-	InvalidIndex,
 	EmergencyFinalizerUsed,
 }
 
