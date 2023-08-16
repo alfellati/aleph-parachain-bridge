@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 use sp_runtime::{traits::Header as HeaderT, ConsensusEngineId, KeyTypeId, RuntimeDebug};
 use sp_std::{boxed::Box, vec::Vec};
 
+pub mod aleph_justification;
+
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"alp0");
 pub const ALEPH_ENGINE_ID: ConsensusEngineId = *b"FRNK";
 
@@ -34,7 +36,7 @@ mod app {
 }
 
 sp_application_crypto::with_pair! {
-    pub type AuthorityPair = app::Pair;
+	pub type AuthorityPair = app::Pair;
 }
 
 pub type AuthorityId = app::Public;
