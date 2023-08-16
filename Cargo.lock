@@ -263,6 +263,7 @@ dependencies = [
  "pallet-aura",
  "pallet-authorship",
  "pallet-balances",
+ "pallet-bridge-aleph",
  "pallet-collator-selection",
  "pallet-multisig",
  "pallet-preimage",
@@ -954,6 +955,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-aleph-header-chain"
+version = "0.1.0"
+dependencies = [
+ "bp-header-chain",
+ "bp-runtime",
+ "bp-test-utils",
+ "frame-support",
+ "hex",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
+ "sp-application-crypto",
+ "sp-core",
+ "sp-runtime",
+ "sp-std 8.0.0 (git+https://github.com/paritytech/substrate?branch=master)",
+]
+
+[[package]]
 name = "bp-beefy"
 version = "0.1.0"
 dependencies = [
@@ -1232,6 +1251,7 @@ dependencies = [
 name = "bp-test-utils"
 version = "0.1.0"
 dependencies = [
+ "bp-aleph-header-chain",
  "bp-header-chain",
  "bp-parachains",
  "bp-polkadot-core",
@@ -6855,6 +6875,26 @@ dependencies = [
  "sp-io",
  "sp-runtime",
  "sp-std 8.0.0 (git+https://github.com/paritytech/substrate?branch=master)",
+]
+
+[[package]]
+name = "pallet-bridge-aleph"
+version = "0.1.0"
+dependencies = [
+ "bp-aleph-header-chain",
+ "bp-header-chain",
+ "bp-runtime",
+ "bp-test-utils",
+ "frame-support",
+ "frame-system",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std 8.0.0 (git+https://github.com/paritytech/substrate?branch=master)",
+ "sp-trie",
 ]
 
 [[package]]
