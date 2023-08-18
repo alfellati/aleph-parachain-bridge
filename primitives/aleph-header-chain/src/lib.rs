@@ -22,7 +22,7 @@ use codec::{Decode, Encode};
 use core::{clone::Clone, cmp::Eq, default::Default, fmt::Debug};
 use scale_info::TypeInfo;
 use serde::{Deserialize, Serialize};
-use sp_runtime::{traits::Header as HeaderT, ConsensusEngineId, KeyTypeId, RuntimeDebug};
+use sp_runtime::{traits::Header as HeaderT, ConsensusEngineId, Digest, KeyTypeId, RuntimeDebug};
 use sp_std::{boxed::Box, vec::Vec};
 
 pub mod aleph_justification;
@@ -42,6 +42,26 @@ sp_application_crypto::with_pair! {
 pub type AuthorityId = app::Public;
 pub type AuthoritySignature = app::Signature;
 pub type AuthoritySet = Vec<AuthorityId>;
+
+/// Consensus log item for Aleph.
+#[cfg_attr(feature = "std", derive(Serialize))]
+#[derive(Decode, Encode, PartialEq, Eq, Clone, sp_runtime::RuntimeDebug)]
+pub enum ConsensusLog {
+	/// Change of the authorities.
+	#[codec(index = 1)]
+	AlephAuthorityChange(Vec<AuthorityId>),
+}
+
+// Helper method for reading Aleph's consensus log.
+pub fn get_authority_change(digest: &Digest) -> Option<AuthoritySet> {
+	use sp_runtime::generic::OpaqueDigestItemId;
+	let id = OpaqueDigestItemId::Consensus(&ALEPH_ENGINE_ID);
+	let filter_log = |log: ConsensusLog| match log {
+		ConsensusLog::AlephAuthorityChange(change) => Some(change),
+	};
+
+	digest.convert_first(|l| l.try_to(id).and_then(filter_log))
+}
 
 /// Data required for initializing the Aleph bridge pallet.
 ///

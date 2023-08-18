@@ -1251,7 +1251,6 @@ dependencies = [
 name = "bp-test-utils"
 version = "0.1.0"
 dependencies = [
- "bp-aleph-header-chain",
  "bp-header-chain",
  "bp-parachains",
  "bp-polkadot-core",
@@ -6887,6 +6886,7 @@ dependencies = [
  "bp-test-utils",
  "frame-support",
  "frame-system",
+ "hex",
  "log",
  "parity-scale-codec",
  "scale-info",

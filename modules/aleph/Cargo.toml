@@ -27,6 +27,7 @@ sp-trie = { git = "https://github.com/paritytech/substrate", branch = "master", 
 bp-test-utils = { path = "../../primitives/test-utils", default-features = false }
 sp-core = { git = "https://github.com/paritytech/substrate", branch = "master" }
 sp-io = { git = "https://github.com/paritytech/substrate", branch = "master" }
+hex = "0.4"
 
 [features]
 default = ["std"]
